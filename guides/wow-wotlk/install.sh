@@ -164,12 +164,22 @@ else
             sudo steamos-readonly disable
         fi
 
-        # Refresh package database and install Docker via pacman
-        sudo pacman -Sy --noconfirm docker docker-compose
+        # Fix pacman keyring — required on SteamOS before installing anything
+        # steamos-devmode handles keyring init, populate, and dev headers
+        print_info "Initialising pacman keyring (this fixes trust errors)..."
+        if command -v steamos-devmode &>/dev/null; then
+            sudo steamos-devmode enable 2>/dev/null || true
+        else
+            # Manual keyring fix if steamos-devmode not available
+            sudo pacman-key --init 2>/dev/null || true
+            sudo pacman-key --populate archlinux 2>/dev/null || true
+            sudo pacman-key --populate holo 2>/dev/null || true
+        fi
 
-        # Re-enable readonly (optional but good practice)
-        # We leave it off so Docker survives reboots
-        # sudo steamos-readonly enable
+        # Refresh package database and install Docker
+        print_info "Installing Docker via pacman..."
+        sudo pacman -Sy --noconfirm archlinux-keyring 2>/dev/null || true
+        sudo pacman -Sy --noconfirm docker docker-compose
 
     else
         # Standard Linux (Ubuntu, Debian, Fedora etc.)
@@ -191,7 +201,6 @@ fi
 
 # Verify Docker Compose is available
 if ! docker compose version &>/dev/null; then
-    # Try standalone docker-compose as fallback
     if ! docker-compose version &>/dev/null; then
         print_error "Docker Compose not found."
         print_info "On SteamOS try: sudo pacman -Sy --noconfirm docker-compose"
