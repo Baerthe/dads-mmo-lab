@@ -73,6 +73,21 @@ ask_yes_no() {
 INSTALL_DIR="$HOME/wow-server"
 
 # ─────────────────────────────────────────
+# DOCKER CHECK
+# ─────────────────────────────────────────
+if ! command -v docker &>/dev/null; then
+    echo -e "\033[0;31m❌ Docker is not installed. Nothing to uninstall!\033[0m"
+    echo -e "\033[0;34mℹ️  If you installed using install.sh, Docker should be present.\033[0m"
+    exit 1
+fi
+
+if ! docker ps &>/dev/null 2>&1 && ! sudo docker ps &>/dev/null 2>&1; then
+    echo -e "\033[1;33m⚠️  Docker is installed but not running. Starting it now...\033[0m"
+    sudo systemctl start docker 2>/dev/null || true
+    sleep 3
+fi
+
+# ─────────────────────────────────────────
 # START
 # ─────────────────────────────────────────
 clear
@@ -99,29 +114,50 @@ print_warning "Do you want to back up your character data first?"
 echo -e "${BLUE}ℹ️  This saves your characters, items, and progress to a backup file.${NC}"
 echo ""
 
+BACKUP_DIR=""
+
 if ask_yes_no "Create a backup before uninstalling?"; then
 
     BACKUP_DIR="$HOME/wow-server-backup-$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$BACKUP_DIR"
 
-    print_info "Backing up character database..."
+    print_info "Backing up all server databases..."
 
-    if docker ps | grep -q "ac_database"; then
+    if docker ps 2>/dev/null | grep -q "ac_database" || \
+       sudo docker ps 2>/dev/null | grep -q "ac_database"; then
+
         docker exec ac_database mysqldump \
             -uroot -pazeroth \
-            --databases acore_characters acore_auth \
-            > "$BACKUP_DIR/characters_backup.sql" 2>/dev/null
+            --databases acore_characters acore_auth acore_world \
+            > "$BACKUP_DIR/full_server_backup.sql" 2>/dev/null || \
+        sudo docker exec ac_database mysqldump \
+            -uroot -pazeroth \
+            --databases acore_characters acore_auth acore_world \
+            > "$BACKUP_DIR/full_server_backup.sql" 2>/dev/null || true
 
-        if [ -f "$BACKUP_DIR/characters_backup.sql" ] && \
-           [ -s "$BACKUP_DIR/characters_backup.sql" ]; then
-            print_success "Backup saved to: $BACKUP_DIR/characters_backup.sql"
-            print_info "Keep this file if you want to restore your characters later!"
+        if [ -f "$BACKUP_DIR/full_server_backup.sql" ] && \
+           [ -s "$BACKUP_DIR/full_server_backup.sql" ]; then
+            BACKUP_SIZE=$(du -sh "$BACKUP_DIR/full_server_backup.sql" | cut -f1)
+            print_success "Backup saved! (${BACKUP_SIZE})"
+            print_success "Location: $BACKUP_DIR/full_server_backup.sql"
+            print_info "Keep this file — it contains ALL your characters, items and progress!"
         else
-            print_warning "Backup may be incomplete — database might not be running."
+            print_warning "Backup file is empty or missing — database may not be running."
+            print_info "Start the server first with: cd ~/wow-server && ./start.sh"
+            print_info "Then re-run this uninstaller to get a clean backup."
+            BACKUP_DIR=""
         fi
     else
-        print_warning "Database container not running — skipping backup."
-        print_info "If you want to back up manually, start the server first then re-run this script."
+        print_warning "Database container not running — cannot create backup."
+        print_info "To back up first: start the server with ~/wow-server/start.sh"
+        print_info "Then run this uninstaller again."
+        BACKUP_DIR=""
+
+        echo ""
+        if ! ask_yes_no "Continue uninstalling WITHOUT a backup?"; then
+            echo -e "${GREEN}Good call — start the server, back it up, then uninstall.${NC}"
+            exit 0
+        fi
     fi
 fi
 
@@ -160,15 +196,17 @@ print_step "STEP 1/4 — Stopping Server"
 
 if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
     cd "$INSTALL_DIR"
-    docker compose down --volumes --remove-orphans 2>/dev/null || \
-    sudo docker compose down --volumes --remove-orphans 2>/dev/null || true
+    docker compose down --remove-orphans 2>/dev/null || \
+    sudo docker compose down --remove-orphans 2>/dev/null || true
     print_success "Server stopped and containers removed"
 else
     # Try to stop containers directly if compose file is missing
     for container in ac_worldserver ac_authserver ac_database; do
-        if docker ps -a | grep -q "$container"; then
-            docker stop "$container" 2>/dev/null || true
-            docker rm "$container" 2>/dev/null || true
+        if docker ps -a 2>/dev/null | grep -q "$container"; then
+            docker stop "$container" 2>/dev/null || \
+            sudo docker stop "$container" 2>/dev/null || true
+            docker rm "$container" 2>/dev/null || \
+            sudo docker rm "$container" 2>/dev/null || true
             print_success "Removed container: $container"
         fi
     done
@@ -238,10 +276,11 @@ echo -e "${WHITE}Your WoW server has been completely removed.${NC}"
 echo -e "${WHITE}Your WoW client files are untouched.${NC}"
 echo ""
 
-if [ -d "$HOME/wow-server-backup-"* ] 2>/dev/null; then
+if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
     echo -e "${CYAN}Your backup is saved at:${NC}"
-    ls -d "$HOME"/wow-server-backup-* 2>/dev/null
-    echo -e "${CYAN}Keep it safe if you want to restore your characters!${NC}"
+    echo -e "  ${CYAN}$BACKUP_DIR/full_server_backup.sql${NC}"
+    echo -e "${CYAN}To restore it later, reinstall the server then run:${NC}"
+    echo -e "  ${CYAN}docker exec -i ac_database mysql -uroot -pazeroth < full_server_backup.sql${NC}"
     echo ""
 fi
 
