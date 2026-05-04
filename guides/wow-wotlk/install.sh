@@ -23,7 +23,7 @@
 #  Time: ~15-30 minutes (mostly waiting for downloads)
 # ============================================================
 
-set -e  # Exit on any error
+set -uo pipefail  # Catch undefined vars and pipe errors but not every non-zero exit
 
 # ─────────────────────────────────────────
 # COLORS & FORMATTING
@@ -89,7 +89,6 @@ ask_yes_no() {
 # CONFIGURATION
 # ─────────────────────────────────────────
 INSTALL_DIR="$HOME/wow-server"
-GITHUB_RAW="https://raw.githubusercontent.com/DadsMmoLab/dads-mmo-lab/main/guides/wow-wotlk"
 
 # ─────────────────────────────────────────
 # START
@@ -197,6 +196,16 @@ else
     print_success "Docker installed successfully!"
     print_warning "NOTE: You may need to log out and back in for group permissions."
     print_warning "If you see permission errors, log out, log back in, and re-run this script."
+    print_info "Attempting to activate docker group without logout..."
+    # Try to activate group in current session
+    exec sg docker "$0" "$@" 2>/dev/null || true
+fi
+
+# Use sudo for docker if group not yet active
+if ! docker ps &>/dev/null 2>&1; then
+    print_warning "Docker group not active yet in this session — using sudo for docker commands."
+    shopt -s expand_aliases 2>/dev/null || true
+    alias docker='sudo docker'
 fi
 
 # Verify Docker Compose is available
@@ -368,7 +377,7 @@ docker compose up -d
 print_info "Waiting for world server to initialize..."
 echo ""
 
-TIMEOUT=300  # 5 minutes
+TIMEOUT=900  # 15 minutes — first run on slow SD card or slow connection can take a while
 ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do
     if docker logs ac_worldserver 2>&1 | grep -q "World initialized"; then
@@ -417,24 +426,47 @@ while true; do
     echo "Password cannot be empty."
 done
 
-# Create account via worldserver console
-print_info "Creating account..."
-sleep 2
+# Create account via MySQL directly — most reliable method
+print_info "Creating account in database..."
 
-docker exec -i ac_worldserver bash -c "
-echo 'account create $WOW_USERNAME $WOW_PASSWORD' | socat - UNIX-CONNECT:/tmp/worldserver.sock 2>/dev/null || \
-echo 'account create $WOW_USERNAME $WOW_PASSWORD'
-" 2>/dev/null || true
+# Wait a moment to ensure DB is fully ready
+sleep 3
 
-# Alternative method using docker attach with expect-like approach
-docker exec ac_worldserver bash -c "
-echo 'account create $WOW_USERNAME $WOW_PASSWORD'
-echo 'account set gmlevel $WOW_USERNAME 3 -1'
-" 2>/dev/null || true
+# Hash the password the way AzerothCore expects (SHA1 of USER:PASS uppercase)
+WOW_PASS_HASH=$(echo -n "${WOW_USERNAME^^}:${WOW_PASSWORD^^}" | sha1sum | awk '{print toupper($1)}')
 
-print_success "Account created: $WOW_USERNAME"
-print_info "You've been given GM (Game Master) level 3 — full admin powers on your server!"
-print_info "You can use .commands in-game to see all GM commands."
+# Insert account directly into auth database
+docker exec ac_database mysql -uroot -pazeroth acore_auth -e "
+  INSERT INTO account (username, sha_pass_hash, reg_mail, email, joindate)
+  VALUES (
+    UPPER('${WOW_USERNAME}'),
+    '${WOW_PASS_HASH}',
+    'admin@local.lan',
+    'admin@local.lan',
+    NOW()
+  ) ON DUPLICATE KEY UPDATE sha_pass_hash='${WOW_PASS_HASH}';
+" 2>/dev/null
+
+# Get the account ID we just created
+ACCOUNT_ID=$(docker exec ac_database mysql -uroot -pazeroth acore_auth -sNe \
+  "SELECT id FROM account WHERE username=UPPER('${WOW_USERNAME}');" 2>/dev/null)
+
+# Set GM level 3 on all realms
+if [ -n "$ACCOUNT_ID" ]; then
+    docker exec ac_database mysql -uroot -pazeroth acore_auth -e "
+      INSERT INTO account_access (id, gmlevel, RealmID)
+      VALUES ('${ACCOUNT_ID}', 3, -1)
+      ON DUPLICATE KEY UPDATE gmlevel=3;
+    " 2>/dev/null
+    print_success "Account created successfully: ${WOW_USERNAME}"
+    print_info "GM Level 3 granted — full admin powers on your server!"
+else
+    print_warning "Account may not have been created automatically."
+    print_info "You can create it manually after launch:"
+    print_info "  docker attach ac_worldserver"
+    print_info "  account create ${WOW_USERNAME} ${WOW_PASSWORD}"
+    print_info "  account set gmlevel ${WOW_USERNAME} 3 -1"
+fi
 
 # Save credentials
 cat > "$INSTALL_DIR/MY_ACCOUNT.txt" << CREDS
