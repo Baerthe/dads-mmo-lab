@@ -149,34 +149,54 @@ if command -v docker &>/dev/null; then
     print_success "Docker already installed: $DOCKER_VERSION"
 else
     print_info "Docker not found. Installing now..."
-    print_warning "This may ask for your password (sudo)"
+    print_warning "This may ask for your sudo/deck password"
     echo ""
 
-    # SteamOS specific: disable read-only filesystem temporarily
-    if command -v steamos-readonly &>/dev/null; then
-        print_info "Disabling SteamOS read-only filesystem..."
-        sudo steamos-readonly disable
+    # ── Detect SteamOS / Arch vs everything else ──
+    if grep -qi "steamos\|arch" /etc/os-release 2>/dev/null || \
+       command -v pacman &>/dev/null; then
+
+        print_info "SteamOS / Arch Linux detected — using pacman..."
+
+        # SteamOS has a read-only filesystem — disable it first
+        if command -v steamos-readonly &>/dev/null; then
+            print_info "Disabling SteamOS read-only filesystem..."
+            sudo steamos-readonly disable
+        fi
+
+        # Refresh package database and install Docker via pacman
+        sudo pacman -Sy --noconfirm docker docker-compose
+
+        # Re-enable readonly (optional but good practice)
+        # We leave it off so Docker survives reboots
+        # sudo steamos-readonly enable
+
+    else
+        # Standard Linux (Ubuntu, Debian, Fedora etc.)
+        print_info "Standard Linux detected — using get.docker.com..."
+        curl -fsSL https://get.docker.com | sudo sh
     fi
 
-    # Install Docker
-    curl -fsSL https://get.docker.com | sudo sh
-
-    # Add user to docker group
+    # Add current user to docker group (works on both paths)
     sudo usermod -aG docker "$USER"
 
-    # Enable and start Docker
+    # Enable and start Docker service
     sudo systemctl enable docker
     sudo systemctl start docker
 
     print_success "Docker installed successfully!"
-    print_warning "NOTE: You may need to log out and back in for Docker permissions."
-    print_warning "If you get permission errors, log out, log back in, and run this script again."
+    print_warning "NOTE: You may need to log out and back in for group permissions."
+    print_warning "If you see permission errors, log out, log back in, and re-run this script."
 fi
 
-# Check Docker Compose
+# Verify Docker Compose is available
 if ! docker compose version &>/dev/null; then
-    print_error "Docker Compose not found. Please install Docker Desktop or Docker Compose v2."
-    exit 1
+    # Try standalone docker-compose as fallback
+    if ! docker-compose version &>/dev/null; then
+        print_error "Docker Compose not found."
+        print_info "On SteamOS try: sudo pacman -Sy --noconfirm docker-compose"
+        exit 1
+    fi
 fi
 print_success "Docker Compose OK"
 
