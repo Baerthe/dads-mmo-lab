@@ -1,4 +1,4 @@
-#!/bin/bash
+Fix launch options instruction and section header in HOWTO-INSTALL#!/bin/bash
 # ============================================================
 #  Dad's MMO Lab — WoW Offline Server Installer
 #  AzerothCore on Steam Deck (SteamOS / Arch Linux)
