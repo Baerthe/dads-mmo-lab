@@ -124,12 +124,12 @@ fi
 print_success "Linux detected"
 
 # Check available disk space (need at least 15GB)
-AVAILABLE_GB=$(df -BG "$HOME" | awk 'NR==2 {print $4}' | sed 's/G//')
-if [ "$AVAILABLE_GB" -lt 15 ]; then
+AVAILABLE_GB=$(df -BG "$HOME" 2>/dev/null | awk 'NR==2 {print $4}' | sed 's/G//' | tr -d ' ')
+if [ -n "$AVAILABLE_GB" ] && [ "$AVAILABLE_GB" -lt 15 ] 2>/dev/null; then
     print_error "Not enough disk space. You have ${AVAILABLE_GB}GB free, need at least 15GB."
     exit 1
 fi
-print_success "Disk space OK (${AVAILABLE_GB}GB available)"
+print_success "Disk space OK (${AVAILABLE_GB:-unknown}GB available)"
 
 # Check internet
 if ! ping -c 1 github.com &>/dev/null; then
@@ -273,6 +273,24 @@ fi
 mkdir -p "$INSTALL_DIR/logs"
 mkdir -p "$INSTALL_DIR/data"
 
+# ── Disable phpMyAdmin to avoid port 8080 conflicts ──
+# phpMyAdmin is a nice-to-have web DB manager but causes port conflicts
+# on many Steam Decks. We disable it by commenting it out since WoW
+# doesn't need it to run.
+print_info "Configuring docker-compose for Steam Deck..."
+
+if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
+    # Create a docker-compose.override.yml that disables phpmyadmin
+    cat > "$INSTALL_DIR/docker-compose.override.yml" << 'OVERRIDE'
+version: '3.9'
+services:
+  ac-phpmyadmin:
+    profiles:
+      - disabled
+OVERRIDE
+    print_success "phpMyAdmin disabled (prevents port 8080 conflicts)"
+fi
+
 print_success "AzerothCore Docker setup downloaded!"
 print_success "docker-compose.yml is ready!"
 
@@ -338,7 +356,14 @@ print_step "STEP 6/8 — Starting the Server"
 print_info "First launch takes 5-10 minutes to build the database. Please wait..."
 echo ""
 
-docker compose up -d
+if ! docker compose up -d; then
+    print_error "Failed to start the server."
+    print_info "Things to try:"
+    print_info "  1. Check Docker is running: sudo systemctl status docker"
+    print_info "  2. Check logs: docker compose logs"
+    print_info "  3. Try running the installer again"
+    exit 1
+fi
 
 # Wait for worldserver to be ready
 print_info "Waiting for world server to initialize..."
@@ -417,6 +442,13 @@ else
     WOW_PASS_HASH=""
 fi
 
+if [ -z "$WOW_PASS_HASH" ]; then
+    print_warning "Could not hash password — skipping automatic account creation."
+    print_info "Create your account manually after the server starts:"
+    print_info "  docker attach acore-docker-ac-worldserver-1"
+    print_info "  account create ${WOW_USERNAME} ${WOW_PASSWORD} ${WOW_PASSWORD}"
+    print_info "  account set gmlevel ${WOW_USERNAME} 3 -1"
+else
 # Insert account directly into auth database
 docker exec "$DB_CONTAINER" mysql -uroot -ppassword acore_auth -e "
   INSERT INTO account (username, sha_pass_hash, reg_mail, email, joindate)
@@ -447,6 +479,7 @@ else
     print_info "You can create it manually after launch:"
     print_info "  docker attach acore-docker-ac-worldserver-1"
     print_info "  account create ${WOW_USERNAME} ${WOW_PASSWORD} ${WOW_PASSWORD}"
+fi
 fi
 
 # Save credentials
