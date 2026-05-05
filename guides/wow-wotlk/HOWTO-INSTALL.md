@@ -202,14 +202,13 @@ Once everything is set up and working, you can make the whole experience feel li
 
 **This is how it works:**
 1. Launch "WoW Server" from your Steam library in Gaming Mode
-2. It starts the server automatically and tells you when it's ready
+2. Watch the dots — server tells you when it's ready
 3. Press the Steam button, launch WoW from your library
 4. Play your session
-5. Close WoW, go back to the server launcher
-6. Press **A** (or Enter on keyboard) to shut down safely
+5. Close WoW — server **automatically shuts down!** No action needed
 
 Start to playing: **under 1 minute.**
-Exit: **about 20 seconds.**
+Exit: **automatic when you close WoW.**
 
 ---
 
@@ -232,19 +231,26 @@ chmod +x ~/wow-gaming-mode.sh
 
 1. Open **Steam** in Desktop Mode
 2. Click **Games** → **Add a Non-Steam Game**
-3. Click **Browse** and navigate to your home folder
-4. Select `wow-gaming-mode.sh`
+3. Click **Browse** and navigate to `/usr/bin/`
+4. Select `konsole`
 5. Click **Add Selected Programs**
 
 ### Step 4 — Set the Launch Options
 
-1. Find the new entry in your Steam library
+1. Find the new **konsole** entry in your Steam library
 2. Right-click → **Properties**
 3. Change the **name** to: `WoW Server`
-4. Leave the **Launch Options** field **blank**
-5. Under **Compatibility** → check **Force the use of a specific Steam Play compatibility tool** → select **Proton Experimental**
+4. In the **Target** field make sure it says:
+```
+/usr/bin/konsole
+```
+5. In the **Launch Options** field paste this exactly:
+```
+--hold -e bash /home/deck/wow-gaming-mode.sh
+```
+6. Leave **Compatibility** alone — do NOT enable Proton for this
 
-> 💡 You can also set a custom icon and cover art to make it look great in your library!
+> ⚠️ **Important:** Do NOT force Proton on this entry. Konsole is a native Linux app — Proton will cause a blank screen.
 
 ### Step 5 — That's It!
 
