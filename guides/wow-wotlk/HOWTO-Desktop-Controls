@@ -614,10 +614,7 @@ cd ~/wow-server-npcbots && docker compose down
 Before doing anything major — back up your character data:
 
 ```bash
-docker exec wow-server-ac-database-1 mysqldump \
-    -uroot -ppassword \
-    --databases acore_characters acore_auth acore_world \
-    > ~/wow-backup-$(date +%Y%m%d).sql
+docker exec wow-server-ac-database-1 mysqldump -uroot -ppassword --databases acore_characters acore_auth acore_world > ~/wow-backup-20260506.sql
 ```
 
 This saves everything to a file named with today's date.
@@ -625,9 +622,7 @@ Keep this file somewhere safe!
 
 **To restore a backup:**
 ```bash
-docker exec -i wow-server-ac-database-1 \
-    mysql -uroot -ppassword \
-    < ~/wow-backup-YYYYMMDD.sql
+docker exec -i wow-server-ac-database-1 mysql -uroot -ppassword < ~/wow-backup-20260506.sql
 ```
 
 ---
