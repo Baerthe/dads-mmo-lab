@@ -1,264 +1,130 @@
-# 🗑️ How to Uninstall the WoW Server — Complete Beginner Guide
+# 🗑️ How to Uninstall — WoW Server Suite
 
-> **"Clean removal in under 60 seconds."**
-> This guide walks you through completely removing the WoW offline server
-> from your Steam Deck. Your WoW client files will NOT be touched.
-
----
-
-## ⚠️ Read This First — Important Warnings
-
-Before you uninstall, please understand what gets removed:
-
-| What Gets Removed | What Stays Safe |
-|---|---|
-| ❌ The WoW server software | ✅ Your WoW 3.3.5a client files |
-| ❌ All Docker containers | ✅ Docker itself |
-| ❌ Downloaded server images | ✅ All your other games |
-| ❌ Your characters and progress* | ✅ Everything else on your Deck |
-
-> ⭐ ***The uninstaller will offer to back up your characters before deleting anything. Always say YES to the backup!***
+> The uninstaller is safe, smart, and asks before deleting anything.
+> It detects which servers you have installed and lets you choose.
 
 ---
 
-## 📋 Before You Start — Checklist
+## 🚀 Quick Start
 
-- [ ] You are in **Desktop Mode** (not Gaming Mode)
-- [ ] You have read the warning above
-- [ ] If you want to keep your characters — make sure the server is **running** before you uninstall so the backup can work
-
----
-
-## 🖥️ Step 1 — Switch to Desktop Mode
-
-If you're in Gaming Mode:
-1. Press the **STEAM button**
-2. Select **Power**
-3. Select **Switch to Desktop**
-
----
-
-## 📁 Step 2 — Find the Uninstall Script
-
-The `uninstall.sh` file lives in the same place as `install.sh`.
-
-**If you downloaded it from GitHub:**
-1. Open the web browser on your Steam Deck desktop
-2. Go to: `https://github.com/DadsMmoLab/dads-mmo-lab/tree/main/guides/wow-wotlk`
-3. Click on `uninstall.sh`
-4. Download it to your **Downloads folder**
-
-**If you still have it from before:**
-It's wherever you saved it originally — Downloads folder most likely.
-
----
-
-## 🖥️ Step 3 — Open Konsole (The Terminal)
-
-1. Right-click the **desktop background**
-2. Select **Open Terminal** or **Konsole**
-
-A black window with a blinking cursor will appear. That's normal!
-
----
-
-## ⌨️ Step 4 — Navigate to Your Downloads Folder
-
-Type this and press **Enter:**
+Open Konsole in Desktop Mode and run:
 
 ```bash
-cd ~/Downloads
-```
-
-Check the file is there:
-
-```bash
-ls
-```
-
-You should see `uninstall.sh` in the list.
-
----
-
-## 🔑 Step 5 — Give the Uninstaller Permission to Run
-
-Type this and press **Enter:**
-
-```bash
-chmod +x uninstall.sh
-```
-
-Nothing will appear visually — that's completely normal!
-
----
-
-## 🚀 Step 6 — Run the Uninstaller
-
-Type this and press **Enter:**
-
-```bash
-./uninstall.sh
-```
-
-You should see a red header appear:
-
-```
-╔══════════════════════════════════════════════════╗
-║         ⚙️  DAD'S MMO LAB                        ║
-║         WoW Server — UNINSTALLER                 ║
-╚══════════════════════════════════════════════════╝
+chmod +x uninstall.sh && ./uninstall.sh
 ```
 
 ---
 
-## 💬 Step 7 — Answer the Prompts
+## 🗺️ What the Uninstaller Does
 
-The uninstaller will ask you three things. Here's exactly what to expect:
+The uninstaller automatically detects which servers you have installed and builds a menu:
+
+```
+Which server do you want to uninstall?
+
+1) Base WoW Server      (~/wow-server)
+2) NPCBots WoW Server   (~/wow-server-npcbots)
+3) Playerbots WoW       (~/wow-server-playerbots)
+4) ALL servers
+```
+
+Only the servers you actually have installed appear in the menu.
 
 ---
 
-### Prompt 1 — Backup Your Characters
+## 💾 Backup First!
+
+Before uninstalling the script asks if you want to back up your character data:
 
 ```
-⚠️  Do you want to back up your character data first?
-Create a backup before uninstalling? (y/n):
+Do you want to back up your character data first? (y/n)
 ```
 
-**→ Type `y` and press Enter**
+Always say **y** unless you are absolutely sure you do not want your characters.
 
-> ⭐ **ALWAYS say yes to this.** It saves all your characters, items, gold, and progress to a file. It only takes a few seconds. You can restore everything later if you reinstall.
-
-If the backup succeeds you'll see:
+The backup saves to:
 ```
-✅ Backup saved! (XXmb)
-✅ Location: /home/deck/wow-server-backup-XXXXXXXX/full_server_backup.sql
+~/wow-server-backup-YYYYMMDD_HHMMSS/full_server_backup.sql
 ```
 
-> 💡 **Note:** If the backup says the database isn't running, that means your WoW server isn't started. Exit the uninstaller, start the server with `cd ~/wow-server && ./start.sh`, wait 30 seconds, then run the uninstaller again.
+Keep this file somewhere safe. You can restore it after reinstalling.
 
 ---
 
-### Prompt 2 — Final Confirmation
+## 🔒 Safety Confirmations
+
+The uninstaller has two safety steps before deleting anything:
 
 ```
-⚠️  THIS CANNOT BE UNDONE ⚠️
-Are you absolutely sure you want to uninstall? (y/n):
+Are you absolutely sure you want to uninstall? (y/n)
 ```
 
-**→ Type `y` and press Enter** if you're sure
-
-**→ Type `n` and press Enter** to cancel safely
-
----
-
-### Prompt 3 — Type DELETE to Confirm
+Then:
 
 ```
 Last chance — type DELETE to confirm:
 ```
 
-**→ Type `DELETE` (all capitals) and press Enter**
-
-> 💡 This is the final safety check. If you type anything other than DELETE the uninstall will cancel and your server will be safe.
+You must type `DELETE` exactly to proceed. This prevents accidents.
 
 ---
 
-## ⏳ Step 8 — Wait for Removal
+## 🗑️ What Gets Removed
 
-The uninstaller will now:
+For each selected server:
 
-1. **Stop all server containers** — takes about 10 seconds
-2. **Remove Docker images** — takes about 20 seconds
-3. **Remove the database** — instant
-4. **Delete the server folder** — instant
+- All Docker containers for that server
+- All Docker images downloaded for that server
+- The server folder and all its contents
+- The database volume with all character data
+- The Gaming Mode launcher script
 
-You'll see green checkmarks as each step completes. When you see:
-
-```
-╔══════════════════════════════════════════════════╗
-║   ✅ UNINSTALL COMPLETE                           ║
-╚══════════════════════════════════════════════════╝
-```
-
-**Your WoW server has been completely removed!** ✅
+**What is NOT touched:**
+- Your WoW 3.3.5a client files
+- Docker itself
+- Any other server versions you did not select
+- Any other projects on your system
 
 ---
 
-## 💾 Step 9 — Save Your Backup File (Important!)
+## 🔄 Reinstalling After Uninstall
 
-If you made a backup in Step 7, the uninstaller will show you where it saved:
-
-```
-Your backup is saved at:
-  /home/deck/wow-server-backup-XXXXXXXX/full_server_backup.sql
-```
-
-**Copy this file somewhere safe** — USB drive, cloud storage, or your PC. If you ever reinstall and want your characters back, you'll need this file.
-
----
-
-## 🔄 Want to Reinstall Later?
-
-Reinstalling from scratch is easy. Just run the installer again:
+After uninstalling you can reinstall fresh at any time:
 
 ```bash
-chmod +x install.sh && ./install.sh
+chmod +x install-wow.sh && ./install-wow.sh
 ```
 
-To restore your characters after reinstalling:
+The wizard will walk you through everything again from scratch.
+
+---
+
+## 💡 Restoring a Backup
+
+If you backed up before uninstalling and want to restore your characters after reinstalling:
+
+1. Reinstall the server using install-wow.sh
+2. Wait for the server to fully start
+3. Run this command with your backup file:
 
 ```bash
-docker exec -i acore-docker-ac-database-1 \
-  mysql -uroot -ppassword \
-  < ~/wow-server-backup-XXXXXXXX/full_server_backup.sql
+DB=$(docker ps --format '{{.Names}}' | grep -iE "database" | head -1)
+docker exec -i $DB mysql -uroot -ppassword < ~/wow-server-backup-YYYYMMDD_HHMMSS/full_server_backup.sql
 ```
 
-*(Replace XXXXXXXX with the actual date/time in your backup folder name)*
+Replace the date in the filename with your actual backup date.
 
 ---
 
-## ❓ Something Went Wrong?
+## What is Next?
 
-**"Nothing happens when I run uninstall.sh"**
-→ Run `chmod +x uninstall.sh` first, then `./uninstall.sh`
-→ Make sure you have the `./` at the start
-
-**"Database container not running — cannot create backup"**
-→ Start the server first: `cd ~/wow-server && ./start.sh`
-→ Wait 30 seconds then run the uninstaller again
-
-**"Docker is not installed"**
-→ If you never successfully installed the server, there's nothing to uninstall
-→ Your Steam Deck is clean already!
-
-**"Permission denied"**
-→ Run `chmod +x uninstall.sh` again then try `./uninstall.sh`
-
-**The uninstaller finished but I can still see containers running**
-→ Run: `docker ps` to check
-→ If anything is still running: `docker stop $(docker ps -q) && docker rm $(docker ps -aq)`
-
-**Still stuck?**
-→ Drop a comment on our [Reddit post](https://www.reddit.com/r/SteamDeck/s/A8SvXK0eOc)
-→ Open an [issue on GitHub](https://github.com/DadsMmoLab/dads-mmo-lab/issues)
-→ We respond fast!
+- Want to reinstall? See HOWTO-INSTALL.md
+- Want to manage your server? See HOWTO-DESKTOP-CONTROLS-1.md
+- Want to move characters between servers? See HOWTO-MIGRATE.md
 
 ---
 
-## 📺 Prefer to Watch?
+*Part of the Dad's MMO Lab project — offline MMO servers on Steam Deck, free forever.*
 
-Full video walkthrough at:
-
-**[youtube.com/@DadsMmoLab](https://youtube.com/@DadsMmoLab)**
-
----
-
-## 🔒 What About My WoW Client?
-
-Your WoW 3.3.5a client folder is **completely untouched** by this uninstaller. The uninstaller only removes the server software — Docker containers, images, and the `~/wow-server` folder.
-
-Your game files are safe. Always.
-
----
-
-*Part of the [Dad's MMO Lab](https://github.com/DadsMmoLab/dads-mmo-lab) project — offline MMO servers on Steam Deck, free forever.*
+**youtube.com/@DadsMmoLab**
+**github.com/DadsMmoLab/dads-mmo-lab**
