@@ -58,18 +58,47 @@ print_error()   { echo -e "${RED}❌ $1${NC}"; }
 print_info()    { echo -e "${BLUE}ℹ️  $1${NC}"; }
 
 # ─────────────────────────────────────────
+# MYSQL HELPERS — stderr visible for real error diagnosis
+# ─────────────────────────────────────────
+mysql_query() {
+    local db="$1"
+    local query="$2"
+    docker exec "$DB_CONTAINER" mysql -uroot -ppassword "$db" \
+        -sNe "$query"
+}
+
+mysql_exec() {
+    local db="$1"
+    local query="$2"
+    docker exec "$DB_CONTAINER" mysql -uroot -ppassword "$db" \
+        -e "$query"
+}
+
+# ─────────────────────────────────────────
+# DB CONNECTIVITY TEST
+# ─────────────────────────────────────────
+test_db_connection() {
+    print_info "Testing database connection..."
+    if ! docker exec "$DB_CONTAINER" mysql -uroot -ppassword \
+        -e "SELECT 1;" &>/dev/null; then
+        print_error "Cannot connect to database!"
+        print_info "The database container is running but not accepting connections yet."
+        print_info "Wait 30 seconds and try again — it may still be starting up."
+        exit 1
+    fi
+    print_success "Database connection OK"
+}
+
+# ─────────────────────────────────────────
 # DETECT SERVER
 # ─────────────────────────────────────────
 detect_server() {
-    # Find running database container
     DB_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null \
         | grep -iE "ac.database|ac_database" | head -1)
 
-    # Find running worldserver container
     WORLD_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null \
         | grep -i "worldserver" | head -1)
 
-    # Find server folder
     if [ -d "$HOME/wow-server-npcbots" ]; then
         SERVER_DIR="$HOME/wow-server-npcbots"
     elif [ -d "$HOME/wow-server-playerbots" ]; then
@@ -99,23 +128,9 @@ detect_server() {
     print_success "Found server: $SERVER_DIR"
     print_success "Database: $DB_CONTAINER"
     print_success "Worldserver: $WORLD_CONTAINER"
-}
 
-# ─────────────────────────────────────────
-# MYSQL HELPERS
-# ─────────────────────────────────────────
-mysql_query() {
-    local db="$1"
-    local query="$2"
-    docker exec "$DB_CONTAINER" mysql -uroot -ppassword "$db" \
-        -sNe "$query" 2>/dev/null
-}
-
-mysql_exec() {
-    local db="$1"
-    local query="$2"
-    docker exec "$DB_CONTAINER" mysql -uroot -ppassword "$db" \
-        -e "$query" 2>/dev/null
+    # Verify DB is actually accepting connections, not just running
+    test_db_connection
 }
 
 # ─────────────────────────────────────────
@@ -124,7 +139,6 @@ mysql_exec() {
 create_ahbot_account() {
     print_step "STEP 1/4 — Creating AH Bot Account"
 
-    # Check if account already exists
     EXISTING=$(mysql_query "acore_auth" \
         "SELECT id FROM account WHERE username='AHBOT';")
 
@@ -134,7 +148,6 @@ create_ahbot_account() {
         return 0
     fi
 
-    # Create the ahbot account
     print_info "Creating ahbot account..."
 
     AHBOT_HASH=$(echo -n "AHBOT:AHBOT" | sha1sum 2>/dev/null \
@@ -158,6 +171,7 @@ create_ahbot_account() {
 
     if [ -z "$AHBOT_ACCOUNT_ID" ]; then
         print_error "Failed to create AH Bot account."
+        print_info "Check the database error above for details."
         exit 1
     fi
 
@@ -215,20 +229,29 @@ wait_for_character() {
     echo -e "${BLUE}ℹ️  No need to come back here until WoW is closed.${NC}"
     echo ""
 
-    TIMEOUT=1800  # 30 minute timeout
+    TIMEOUT=1800
     ELAPSED=0
     CHAR_GUID=""
 
     while [ $ELAPSED -lt $TIMEOUT ]; do
-        # Look for any character on the ahbot account
         CHAR_GUID=$(mysql_query "acore_characters" \
-            "SELECT guid FROM characters WHERE account=${AHBOT_ACCOUNT_ID} LIMIT 1;")
+            "SELECT guid FROM characters WHERE account=${AHBOT_ACCOUNT_ID} LIMIT 1;" 2>/dev/null)
 
         if [ -n "$CHAR_GUID" ]; then
-            # Also get the character name for display
             CHAR_NAME=$(mysql_query "acore_characters" \
-                "SELECT name FROM characters WHERE guid=${CHAR_GUID};")
+                "SELECT name FROM characters WHERE guid=${CHAR_GUID};" 2>/dev/null)
             break
+        fi
+
+        # Periodic DB health check every 60 seconds
+        if [ $((ELAPSED % 60)) -eq 0 ] && [ $ELAPSED -gt 0 ]; then
+            if ! docker exec "$DB_CONTAINER" mysql -uroot -ppassword \
+                -e "SELECT 1;" &>/dev/null; then
+                echo ""
+                print_error "Database connection lost during wait!"
+                print_info "Check your server: cd $SERVER_DIR && docker compose ps"
+                exit 1
+            fi
         fi
 
         printf "  ."
@@ -258,10 +281,8 @@ wait_for_character() {
 configure_ahbot() {
     print_step "STEP 4/4 — Configuring AH Bot"
 
-    # Find the config file location
     local conf_path=""
 
-    # Check common locations
     for path in \
         "$SERVER_DIR/env/dist/etc/modules/mod_ahbot.conf" \
         "$SERVER_DIR/env/dist/etc/modules/mod_ahbot.conf.dist" \
@@ -272,7 +293,6 @@ configure_ahbot() {
         fi
     done
 
-    # Find the dist file to copy from
     local conf_dist=""
     for path in \
         "$SERVER_DIR/env/dist/etc/modules/mod_ahbot.conf.dist" \
@@ -283,7 +303,6 @@ configure_ahbot() {
         fi
     done
 
-    # Create config from dist if needed
     if [ -z "$conf_path" ] && [ -n "$conf_dist" ]; then
         conf_path="${conf_dist%.dist}"
         cp "$conf_dist" "$conf_path"
@@ -291,36 +310,49 @@ configure_ahbot() {
     fi
 
     if [ -n "$conf_path" ] && [ -f "$conf_path" ]; then
-        # Update the config with our account and character GUID
         print_info "Writing AH Bot configuration..."
 
         # Set account ID
         if grep -q "AuctionHouseBot.Account" "$conf_path"; then
-            sed -i "s/AuctionHouseBot.Account\s*=.*/AuctionHouseBot.Account = ${AHBOT_ACCOUNT_ID}/" "$conf_path"
+            if ! sed -i "s/AuctionHouseBot.Account\s*=.*/AuctionHouseBot.Account = ${AHBOT_ACCOUNT_ID}/" "$conf_path"; then
+                print_warning "Failed to update AuctionHouseBot.Account — check file permissions"
+            fi
         else
-            echo "AuctionHouseBot.Account = ${AHBOT_ACCOUNT_ID}" >> "$conf_path"
+            echo "AuctionHouseBot.Account = ${AHBOT_ACCOUNT_ID}" >> "$conf_path" || \
+                print_warning "Failed to write AuctionHouseBot.Account to config"
         fi
 
         # Set character GUID
         if grep -q "AuctionHouseBot.GUID\|AuctionHouseBot.GUIDs" "$conf_path"; then
-            sed -i "s/AuctionHouseBot\.GUIDs\?\s*=.*/AuctionHouseBot.GUID = ${CHAR_GUID}/" "$conf_path"
+            if ! sed -i "s/AuctionHouseBot\.GUIDs\?\s*=.*/AuctionHouseBot.GUID = ${CHAR_GUID}/" "$conf_path"; then
+                print_warning "Failed to update AuctionHouseBot.GUID — check file permissions"
+            fi
         else
-            echo "AuctionHouseBot.GUID = ${CHAR_GUID}" >> "$conf_path"
+            echo "AuctionHouseBot.GUID = ${CHAR_GUID}" >> "$conf_path" || \
+                print_warning "Failed to write AuctionHouseBot.GUID to config"
         fi
 
-        # Enable the bot
+        # Enable seller
         if grep -q "AuctionHouseBot.EnableSeller" "$conf_path"; then
-            sed -i "s/AuctionHouseBot.EnableSeller\s*=.*/AuctionHouseBot.EnableSeller = 1/" "$conf_path"
+            if ! sed -i "s/AuctionHouseBot.EnableSeller\s*=.*/AuctionHouseBot.EnableSeller = 1/" "$conf_path"; then
+                print_warning "Failed to update AuctionHouseBot.EnableSeller — check file permissions"
+            fi
         else
-            echo "AuctionHouseBot.EnableSeller = 1" >> "$conf_path"
+            echo "AuctionHouseBot.EnableSeller = 1" >> "$conf_path" || \
+                print_warning "Failed to write AuctionHouseBot.EnableSeller to config"
         fi
 
         # Enable buyer
         if grep -q "AuctionHouseBot.EnableBuyer\|AuctionHouseBot.Buyer.Enabled" "$conf_path"; then
-            sed -i "s/AuctionHouseBot\.EnableBuyer\s*=.*/AuctionHouseBot.EnableBuyer = 1/" "$conf_path"
-            sed -i "s/AuctionHouseBot\.Buyer\.Enabled\s*=.*/AuctionHouseBot.Buyer.Enabled = 1/" "$conf_path"
+            if ! sed -i "s/AuctionHouseBot\.EnableBuyer\s*=.*/AuctionHouseBot.EnableBuyer = 1/" "$conf_path"; then
+                print_warning "Failed to update AuctionHouseBot.EnableBuyer — check file permissions"
+            fi
+            if ! sed -i "s/AuctionHouseBot\.Buyer\.Enabled\s*=.*/AuctionHouseBot.Buyer.Enabled = 1/" "$conf_path"; then
+                print_warning "Failed to update AuctionHouseBot.Buyer.Enabled — check file permissions"
+            fi
         else
-            echo "AuctionHouseBot.EnableBuyer = 1" >> "$conf_path"
+            echo "AuctionHouseBot.EnableBuyer = 1" >> "$conf_path" || \
+                print_warning "Failed to write AuctionHouseBot.EnableBuyer to config"
         fi
 
         print_success "Config written!"
@@ -330,15 +362,11 @@ configure_ahbot() {
         print_info "  Buyer:      Enabled"
 
     else
-        # No config file found — write the settings as env variables instead
         print_warning "Config file not found — writing environment variables instead"
 
-        # Add to docker-compose.override.yml
         if [ -f "$SERVER_DIR/docker-compose.override.yml" ]; then
-            # Check if ac-worldserver environment section exists
             if grep -q "ac-worldserver" "$SERVER_DIR/docker-compose.override.yml"; then
                 print_info "Adding AH Bot settings to docker-compose.override.yml"
-                # This is complex YAML manipulation — safer to just note it
                 print_info "Please add these lines manually to your override file:"
                 print_info "  AC_AUCTIONHOUSEBOT_ACCOUNT: \"${AHBOT_ACCOUNT_ID}\""
                 print_info "  AC_AUCTIONHOUSEBOT_GUID: \"${CHAR_GUID}\""
@@ -349,10 +377,16 @@ configure_ahbot() {
 
     # Restart worldserver to apply config
     print_info "Restarting worldserver to activate AH Bot..."
-    docker restart "$WORLD_CONTAINER" 2>/dev/null || \
-    sudo docker restart "$WORLD_CONTAINER" 2>/dev/null || true
+    if ! docker restart "$WORLD_CONTAINER" 2>/dev/null; then
+        if ! sudo docker restart "$WORLD_CONTAINER" 2>/dev/null; then
+            print_error "Failed to restart worldserver!"
+            print_info "AH Bot config was written but won't activate until you restart manually:"
+            print_info "  docker restart $WORLD_CONTAINER"
+            return 1
+        fi
+    fi
 
-    # Wait for it to come back
+    # Wait for worldserver to come back up
     sleep 15
     local restart_attempts=0
     while [ $restart_attempts -lt 30 ]; do
