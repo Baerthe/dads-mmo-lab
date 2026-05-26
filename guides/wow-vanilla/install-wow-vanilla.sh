@@ -5,7 +5,7 @@
 #
 #  https://github.com/DadsMmoLab/dads-mmo-lab
 #
-#  Version: 1.1.1
+#  Version: 1.1.2
 #
 #  Usage:
 #    chmod +x install-wow-vanilla.sh
@@ -47,7 +47,7 @@
 #    - 3-5 hours of wall-clock time (mostly hands-off)
 # ============================================================
 
-INSTALLER_VERSION="1.1.1"
+INSTALLER_VERSION="1.1.2"
 
 set -o pipefail
 
@@ -114,7 +114,8 @@ press_enter() {
 # ─────────────────────────────────────────
 SERVER_DIR="$HOME/wow-vanilla-server"
 CLIENT_DIR=""
-DB_PASSWORD="vanilla$(date +%s | tail -c 6)"
+DB_PASSWORD="vanilla$(openssl rand -hex 8)"
+DB_PASSWORD_LOADED=false   # set to true when loaded from .db_password file
 
 # Source pinning — change these to update what we compile
 # Using master at install time. Future: pin to specific commits for stability.
@@ -174,22 +175,83 @@ check_pacman_keyring() {
 
 # ─────────────────────────────────────────
 # DOCKER INSTALL
+#
+# Hardened against three failure modes:
+#   1. Podman masquerading as docker — docker-compose fails hours later
+#   2. docker installed without docker-compose — compose subcommand missing
+#   3. Broken ~/.docker/cli-plugins/docker-compose — exec format error
+# Also handles WSL2 (Docker Desktop) and the post-install group refresh.
 # ─────────────────────────────────────────
 install_docker() {
+    local has_docker=0
     if command -v docker &>/dev/null && docker ps &>/dev/null; then
-        print_success "Docker already installed and running"
+        has_docker=1
+    fi
+
+    # ── WSL2: Docker must come from Docker Desktop ────────────────────
+    # pacman/steamos-readonly don't exist in WSL — bail early with guidance.
+    if grep -qi microsoft /proc/version 2>/dev/null || \
+       grep -qi wsl /proc/version 2>/dev/null; then
+        if [ $has_docker -eq 1 ] && docker compose version &>/dev/null; then
+            print_success "Docker + Compose available (Docker Desktop / WSL2)"
+            return 0
+        fi
+        print_error "Docker not available in WSL."
+        print_info ""
+        print_info "On Windows/WSL2, install Docker via Docker Desktop:"
+        print_info "  1. Install Docker Desktop for Windows"
+        print_info "  2. Settings → Resources → WSL Integration"
+        print_info "     → Enable integration for your distro"
+        print_info "  3. Re-run this installer"
+        exit 1
+    fi
+
+    # ── Reject podman masquerading as docker ──────────────────────────
+    # podman's docker-compose shim causes 'docker compose' to fail with
+    # exec format errors or missing provider — hours into the install.
+    if [ $has_docker -eq 1 ] && docker --version 2>&1 | grep -qi podman; then
+        print_error "Detected podman pretending to be docker."
+        print_info ""
+        print_info "Podman's docker-compose shim is what causes"
+        print_info "'Failed to start db container' on Steam Deck."
+        print_info ""
+        print_info "Run our uninstaller first — it has a 'Clean Docker' step:"
+        print_info "  bash ~/Downloads/uninstall.sh"
+        print_info "  (choose option D — Clean Docker environment)"
+        print_info ""
+        print_info "Then re-run this installer."
+        exit 1
+    fi
+
+    # ── If real Docker is present AND compose works, we're done ──────
+    if [ $has_docker -eq 1 ] && docker compose version &>/dev/null; then
+        print_success "Docker + Compose already installed and working"
         return 0
     fi
 
-    print_info "Installing Docker..."
+    if [ $has_docker -eq 1 ]; then
+        print_warning "Docker is installed but 'docker compose' is not working."
+        print_info "Will install docker-compose alongside existing Docker."
+    else
+        print_info "Installing Docker + Compose..."
+    fi
     check_pacman_keyring
+
+    # ── Wipe any broken cli-plugin before installing ──────────────────
+    if [ -f "$HOME/.docker/cli-plugins/docker-compose" ] && \
+       ! "$HOME/.docker/cli-plugins/docker-compose" version &>/dev/null; then
+        print_info "Removing broken ~/.docker/cli-plugins/docker-compose..."
+        rm -f "$HOME/.docker/cli-plugins/docker-compose"
+    fi
 
     # SteamOS read-only root — use the standard unlock + install pattern
     if ! sudo steamos-readonly disable 2>/dev/null; then
         print_warning "steamos-readonly disable failed — may already be writable"
     fi
 
-    if ! sudo pacman -Sy --noconfirm docker; then
+    # Install BOTH docker and docker-compose. The 'docker' Arch package alone
+    # doesn't ship the compose subcommand reliably on SteamOS.
+    if ! sudo pacman -Sy --noconfirm docker docker-compose; then
         print_error "Failed to install Docker via pacman."
         print_info "If keyring errors: sudo pacman-key --init && sudo pacman-key --populate"
         sudo steamos-readonly enable 2>/dev/null || true
@@ -200,7 +262,26 @@ install_docker() {
 
     sudo systemctl enable --now docker
     sudo usermod -aG docker "$USER"
-    print_success "Docker installed"
+    print_success "Docker + Compose installed"
+
+    # ── Verify 'docker compose' subcommand works ──────────────────────
+    # Check via sudo because user's group membership hasn't refreshed yet.
+    # If the Arch package didn't drop a cli-plugin link, shim it ourselves.
+    if ! sudo docker compose version &>/dev/null; then
+        if command -v docker-compose &>/dev/null; then
+            print_info "Shimming docker-compose into ~/.docker/cli-plugins/..."
+            mkdir -p "$HOME/.docker/cli-plugins"
+            cat > "$HOME/.docker/cli-plugins/docker-compose" <<'SHIM'
+#!/bin/bash
+exec /usr/bin/docker-compose "$@"
+SHIM
+            chmod +x "$HOME/.docker/cli-plugins/docker-compose"
+        else
+            print_error "docker-compose binary missing after install — bailing."
+            print_info "Try: sudo pacman -S docker-compose"
+            exit 1
+        fi
+    fi
 
     if ! docker ps &>/dev/null; then
         print_warning "Docker group not yet active in this shell."
@@ -210,6 +291,13 @@ install_docker() {
     else
         DOCKER_CMD="docker"
     fi
+
+    if ! $DOCKER_CMD compose version &>/dev/null; then
+        print_error "'docker compose' still not working after install."
+        print_info "Run for diagnosis: $DOCKER_CMD compose version"
+        exit 1
+    fi
+    print_success "'docker compose' verified working"
 }
 
 # ─────────────────────────────────────────
@@ -416,9 +504,36 @@ do_compile() {
     print_header
     print_step "STEP 3/5 — Compiling CMaNGOS (2-4 hours)"
 
-    # Remove existing if user wants to start fresh
-    if [ -d "$SERVER_DIR" ]; then
-        print_warning "Existing install found at $SERVER_DIR"
+    # ── Check for existing install ───────────────────────────────────
+    local image_exists=false
+    $DOCKER_CMD image inspect "$SERVER_IMAGE" &>/dev/null && image_exists=true
+
+    if [ -d "$SERVER_DIR" ] && [ "$image_exists" = true ]; then
+        # Both the server dir and compiled image exist. Show the user
+        # their options — default is to reuse, but give a clear path
+        # to wipe everything and start over.
+        print_success "Compiled image found: $SERVER_IMAGE"
+        print_info "Skipping the 2-4 hour compile — previous build is ready."
+        echo ""
+        if ask_yes_no "Start completely fresh instead? (wipes all files + re-compiles, ~2-4 hrs)"; then
+            print_info "Removing existing install and compiled image..."
+            cd "$SERVER_DIR" 2>/dev/null && \
+                $DOCKER_CMD compose down -v 2>/dev/null || true
+            $DOCKER_CMD rmi "$SERVER_IMAGE" 2>/dev/null || true
+            sudo rm -rf "$SERVER_DIR"
+            print_success "Wiped — starting fresh compile"
+            image_exists=false
+            # Fall through to full compile below
+        else
+            print_info "Keeping existing build — skipping compile."
+            mkdir -p "$SERVER_DIR/data"
+            cd "$SERVER_DIR" || exit 1
+            return 0
+        fi
+
+    elif [ -d "$SERVER_DIR" ]; then
+        # Server dir exists but compiled image is missing — partial install.
+        print_warning "Existing install folder found at $SERVER_DIR (no compiled image present)"
         if ask_yes_no "Remove it and start fresh?"; then
             cd "$SERVER_DIR" 2>/dev/null && \
                 $DOCKER_CMD compose down -v 2>/dev/null || true
@@ -428,6 +543,14 @@ do_compile() {
             print_info "Keeping existing install — exiting."
             exit 0
         fi
+
+    elif [ "$image_exists" = true ]; then
+        # Image exists but server dir is gone — skip compile, no wipe needed.
+        print_success "Compiled image found: $SERVER_IMAGE"
+        print_info "Skipping compile — reusing existing build."
+        mkdir -p "$SERVER_DIR" "$SERVER_DIR/source" "$SERVER_DIR/build" "$SERVER_DIR/data"
+        cd "$SERVER_DIR" || exit 1
+        return 0
     fi
 
     mkdir -p "$SERVER_DIR"
@@ -756,6 +879,24 @@ extract_client_data() {
 write_compose_and_configs() {
     print_step "Writing compose.yml and configs"
 
+    # ── Persist DB password across re-runs ───────────────────────────
+    # DB_PASSWORD is generated fresh each time the script launches.
+    # If the MariaDB volume already exists from a previous run, it was
+    # initialized with a different password — any new random value will
+    # be denied with "Access denied for root". Loading the saved password
+    # ensures we always connect to the existing volume with the right
+    # credentials. When SERVER_DIR is wiped (fresh install), this file
+    # goes with it and a new password is generated and saved cleanly.
+    local pw_file="$SERVER_DIR/.db_password"
+    if [ -f "$pw_file" ]; then
+        DB_PASSWORD=$(cat "$pw_file")
+        DB_PASSWORD_LOADED=true
+        print_info "Loaded existing database password from previous install."
+    else
+        echo "$DB_PASSWORD" > "$pw_file"
+        chmod 600 "$pw_file"
+    fi
+
     # Compose: database + realmd (login) + mangosd (world)
     cat > "$SERVER_DIR/compose.yml" << EOF
 services:
@@ -771,10 +912,11 @@ services:
     networks:
       - vanilla-net
     healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      test: ["CMD", "mariadb", "-u", "root", "--password=${DB_PASSWORD}", "-e", "SELECT 1"]
       interval: 10s
       timeout: 5s
       retries: 30
+      start_period: 60s
 
   realmd:
     image: ${SERVER_IMAGE}
@@ -870,11 +1012,12 @@ EOF
             fi
         done
 
-        if [ $patches_ok -ge 4 ]; then
-            print_success "mangosd.conf patched ($patches_ok/5 verification checks passed)"
+        if [ $patches_ok -eq 5 ]; then
+            print_success "mangosd.conf patched (all 5/5 verified)"
         else
-            print_warning "mangosd.conf patches only partial ($patches_ok/5 verified)"
-            print_info "Server may still work; if not, check $SERVER_DIR/etc/mangosd.conf"
+            print_warning "mangosd.conf patching incomplete — only $patches_ok/5 verified."
+            print_warning "Server will likely fail to connect to the database."
+            print_info "Check $SERVER_DIR/etc/mangosd.conf before starting."
         fi
     else
         print_error "mangosd.conf not extracted from image!"
@@ -904,6 +1047,33 @@ setup_database() {
     # mangosd/realmd will be started later, AFTER schemas are imported.
     # Otherwise they'd restart-loop trying to connect to empty DBs.
     # ────────────────────────────────────────────────────────────────
+    # Remove any stale vanilla-db container from a previous failed install so
+    # docker compose up doesn't fail with "container name already in use".
+    $DOCKER_CMD rm -f vanilla-db 2>/dev/null || true
+
+    # ── Stale volume detection ────────────────────────────────────────
+    # If we generated a NEW password (DB_PASSWORD_LOADED=false) but a DB
+    # volume already exists from a previous run, that volume was initialized
+    # with a different password — connecting will fail with "Access denied".
+    # This happens when the user's first run used an older installer that
+    # didn't save .db_password. Safe fix: wipe the stale volume so MariaDB
+    # re-initializes cleanly with the new password we just generated.
+    local compose_project
+    compose_project=$(basename "$SERVER_DIR")
+    local db_volume="${compose_project}_db-data"
+    if [ "${DB_PASSWORD_LOADED}" = false ]; then
+        if $DOCKER_CMD volume ls -q 2>/dev/null | grep -qx "${db_volume}"; then
+            print_warning "Found stale MariaDB volume with unknown password — removing so DB re-initializes cleanly..."
+            $DOCKER_CMD volume rm "${db_volume}" 2>/dev/null || true
+        fi
+    fi
+
+    # Pre-pull the MariaDB image so the download doesn't eat into the
+    # startup timer below. If the image is already cached this is instant.
+    print_info "Pulling MariaDB image..."
+    $DOCKER_CMD pull mariadb:11 2>&1 | tail -3 || \
+        print_warning "Image pull had warnings — continuing"
+
     print_info "Starting MariaDB container..."
     if ! $DOCKER_CMD compose up -d db; then
         print_error "Failed to start db container."
@@ -911,25 +1081,86 @@ setup_database() {
         exit 1
     fi
 
-    print_info "Waiting for MariaDB to be ready..."
+    # ── Wait for MariaDB to be ready (up to 5 minutes) ───────────────
+    # First-run initialization (InnoDB setup, system tables, root account)
+    # regularly takes 2-3 minutes on Steam Deck hardware. The old 120s
+    # limit was too tight. We now watch Docker's own healthcheck status
+    # so we get an early exit the moment the server is confirmed ready,
+    # and a fast failure if Docker marks it unhealthy.
+    print_info "Waiting for MariaDB to be ready (up to 5 min on first run)..."
     local elapsed=0
-    while [ $elapsed -lt 60 ]; do
+    while [ $elapsed -lt 300 ]; do
+        local health
+        health=$($DOCKER_CMD inspect \
+            --format='{{.State.Health.Status}}' vanilla-db 2>/dev/null || echo "unknown")
+
+        if [ "$health" = "healthy" ]; then
+            break
+        fi
+
+        if [ "$health" = "unhealthy" ]; then
+            echo ""
+            print_error "MariaDB healthcheck failed — container is unhealthy."
+            print_info "Last 20 lines from the container:"
+            $DOCKER_CMD logs vanilla-db --tail 20 2>&1 || true
+            print_info "Full logs: $DOCKER_CMD logs vanilla-db"
+            exit 1
+        fi
+
+        # Fallback: also try a direct connection in case healthcheck is slow
         if $DOCKER_CMD exec -e MYSQL_PWD="${DB_PASSWORD}" vanilla-db \
             mariadb -u root -e "SELECT 1" >/dev/null 2>&1; then
             break
         fi
+
         printf "."
-        sleep 2
-        elapsed=$((elapsed + 2))
+        sleep 5
+        elapsed=$((elapsed + 5))
     done
     echo ""
 
-    if [ $elapsed -ge 60 ]; then
-        print_error "MariaDB didn't respond within 60 seconds."
-        print_info "Check: $DOCKER_CMD compose logs db"
+    if [ $elapsed -ge 300 ]; then
+        print_error "MariaDB didn't respond within 5 minutes."
+        print_info "Last 20 lines from the container:"
+        $DOCKER_CMD logs vanilla-db --tail 20 2>&1 || true
+        print_info "Full logs: $DOCKER_CMD logs vanilla-db"
         exit 1
     fi
     print_success "MariaDB ready"
+
+    # ── Credential check ─────────────────────────────────────────────────
+    # mariadb-admin ping exits 0 even on auth failure, so "ready" above is
+    # liveness only. Verify the password actually works; if not, the volume
+    # was initialized with a different password — wipe it and reinitialize.
+    if ! $DOCKER_CMD exec -e MYSQL_PWD="${DB_PASSWORD}" vanilla-db \
+        mariadb -u root -e "SELECT 1" >/dev/null 2>&1; then
+        print_warning "Password mismatch — volume initialized with a different password."
+        print_warning "Removing stale volume and reinitializing (data will be re-imported)..."
+        $DOCKER_CMD compose down 2>/dev/null || true
+        $DOCKER_CMD volume rm "${db_volume}" 2>/dev/null || true
+        print_info "Restarting MariaDB with correct password..."
+        if ! $DOCKER_CMD compose up -d db; then
+            print_error "Failed to restart db container after volume reset."
+            exit 1
+        fi
+        local reinit_elapsed=0
+        while [ $reinit_elapsed -lt 300 ]; do
+            if $DOCKER_CMD exec -e MYSQL_PWD="${DB_PASSWORD}" vanilla-db \
+                mariadb -u root -e "SELECT 1" >/dev/null 2>&1; then
+                break
+            fi
+            printf "."
+            sleep 5
+            reinit_elapsed=$((reinit_elapsed + 5))
+        done
+        echo ""
+        if [ $reinit_elapsed -ge 300 ]; then
+            print_error "MariaDB didn't respond within 5 minutes after volume reset."
+            $DOCKER_CMD logs vanilla-db --tail 20 2>&1 || true
+            exit 1
+        fi
+        print_success "MariaDB reinitialized with correct password"
+    fi
 
     # ────────────────────────────────────────────────────────────────
     # Phase 1: Create dedicated mangos user with grants on all 4 DBs
@@ -1173,7 +1404,7 @@ start_server() {
         restart_count=$($DOCKER_CMD inspect --format '{{.RestartCount}}' \
             vanilla-mangosd 2>/dev/null)
 
-        if [ -n "$restart_count" ] && [ "$restart_count" -gt 2 ] 2>/dev/null; then
+        if [ -n "$restart_count" ] && [ "$restart_count" -gt 0 ] 2>/dev/null; then
             RESTART_DETECTED=1
             break
         fi
@@ -1262,6 +1493,20 @@ setup_gaming_mode() {
     cat > "$launcher_path" << LAUNCHER
 #!/bin/bash
 # Dad's MMO Lab — Vanilla WoW Launcher
+
+# ── Suppress Steam overlay errors ────────────────────────────────
+# When launched from Steam's Gaming Mode, Steam injects its overlay
+# library (gameoverlayrenderer.so) via LD_PRELOAD into every process.
+# That library expects a graphical game window; our launcher is a
+# shell script with no window, so the library spams stderr with:
+#   ERROR: ld.so: object 'gameoverlayrenderer.so' from LD_PRELOAD
+#   cannot be preloaded...
+# Harmless but visually awful. Unsetting LD_PRELOAD here stops the
+# spam at the source without filtering real errors.
+unset LD_PRELOAD
+unset LD_LIBRARY_PATH
+# ─────────────────────────────────────────────────────────────────
+
 LOGFILE=/tmp/wow-vanilla-launcher.log
 echo "=== Vanilla WoW Launcher started \$(date) ===" > "\$LOGFILE"
 
