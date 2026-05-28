@@ -804,7 +804,7 @@ extract_client_data() {
     print_info "  Extraction outputs:"
     print_info "    maps:  $maps_count files (expect ~2000-4000)"
     print_info "    dbc:   $dbc_count files (expect ~150)"
-    print_info "    vmaps: $vmaps_count files (expect ~5000+)"
+    print_info "    vmaps: $vmaps_count files (expect ~3000+)"
 
     if [ "$maps_count" -lt 100 ] || [ "$dbc_count" -lt 100 ] || [ "$vmaps_count" -lt 100 ]; then
         print_error "Extraction did not produce enough output files!"
@@ -1028,6 +1028,44 @@ EOF
         sed -i "s|^LoginDatabaseInfo.*|LoginDatabaseInfo = \"db;3306;mangos;${DB_PASSWORD};realmd\"|" \
             "$SERVER_DIR/etc/realmd.conf"
         print_success "realmd.conf patched"
+    fi
+
+    # ── Playerbots: 1600–2000 random bots ────────────────────────────
+    if [ -f "$SERVER_DIR/etc/aiplayerbot.conf" ]; then
+        sed -i "s|^AiPlayerbot\.MinRandomBots .*|AiPlayerbot.MinRandomBots = 1600|" \
+            "$SERVER_DIR/etc/aiplayerbot.conf"
+        sed -i "s|^AiPlayerbot\.MaxRandomBots .*|AiPlayerbot.MaxRandomBots = 2000|" \
+            "$SERVER_DIR/etc/aiplayerbot.conf"
+        sed -i "s|^AiPlayerbot\.RandomBotAccountCount .*|AiPlayerbot.RandomBotAccountCount = 400|" \
+            "$SERVER_DIR/etc/aiplayerbot.conf"
+        print_success "aiplayerbot.conf patched (1600–2000 bots, 400 accounts)"
+    fi
+
+    # ── AHBot: high-volume auction house (~15k items target) ─────────
+    if [ -f "$SERVER_DIR/etc/ahbot.conf" ]; then
+        sed -i "s|^AuctionHouseBot\.Chance\.Sell .*|AuctionHouseBot.Chance.Sell = 75|" \
+            "$SERVER_DIR/etc/ahbot.conf"
+        sed -i "s|^AuctionHouseBot\.Loot\.Creature\.Normal .*|AuctionHouseBot.Loot.Creature.Normal    =   90, 100, 30, 40|" \
+            "$SERVER_DIR/etc/ahbot.conf"
+        sed -i "s|^AuctionHouseBot\.Loot\.Creature\.Rare .*|AuctionHouseBot.Loot.Creature.Rare      =    0,  30,  1,  2|" \
+            "$SERVER_DIR/etc/ahbot.conf"
+        sed -i "s|^AuctionHouseBot\.Loot\.Creature\.Elite .*|AuctionHouseBot.Loot.Creature.Elite     =   80,  90,  4,  6|" \
+            "$SERVER_DIR/etc/ahbot.conf"
+        sed -i "s|^AuctionHouseBot\.Loot\.Creature\.RareElite .*|AuctionHouseBot.Loot.Creature.RareElite =    0,  15,  1,  2|" \
+            "$SERVER_DIR/etc/ahbot.conf"
+        sed -i "s|^AuctionHouseBot\.Loot\.Creature\.WorldBoss .*|AuctionHouseBot.Loot.Creature.WorldBoss =  -10,   2,  1,  1|" \
+            "$SERVER_DIR/etc/ahbot.conf"
+        sed -i "s|^AuctionHouseBot\.Loot\.Disenchant .*|AuctionHouseBot.Loot.Disenchant =   40,  50,  2,  3|" \
+            "$SERVER_DIR/etc/ahbot.conf"
+        sed -i "s|^AuctionHouseBot\.Loot\.Fishing .*|AuctionHouseBot.Loot.Fishing    =   12,  18,100,150|" \
+            "$SERVER_DIR/etc/ahbot.conf"
+        sed -i "s|^AuctionHouseBot\.Loot\.Gameobject .*|AuctionHouseBot.Loot.Gameobject =   50,  60, 30, 45|" \
+            "$SERVER_DIR/etc/ahbot.conf"
+        sed -i "s|^AuctionHouseBot\.Loot\.Skinning .*|AuctionHouseBot.Loot.Skinning   =   12,  18,200,250|" \
+            "$SERVER_DIR/etc/ahbot.conf"
+        sed -i "s|^AuctionHouseBot\.Items\.Profession .*|AuctionHouseBot.Items.Profession = 250, 300, 0, 50|" \
+            "$SERVER_DIR/etc/ahbot.conf"
+        print_success "ahbot.conf patched (Chance.Sell=75, high-volume loot)"
     fi
 
     print_success "Configs written and patched"
@@ -1388,31 +1426,38 @@ start_server() {
     fi
 
     print_info "Containers started. Waiting for world server to be ready..."
-    print_info "(Loading 17K items, 10K creatures, 2K mmap files takes a minute.)"
+    print_info "(Vanilla + Playerbots loads 200+ bots — first boot takes 3-8 min on Steam Deck.)"
     echo ""
 
-    TIMEOUT=600   # 10 min for full boot
+    # Snapshot the restart count NOW so we only fail on NEW restarts this session,
+    # not on leftover counts from a previous crashed run.
+    local base_restart_count
+    base_restart_count=$($DOCKER_CMD inspect --format '{{.RestartCount}}' \
+        vanilla-mangosd 2>/dev/null || echo "0")
+
+    TIMEOUT=600
     ELAPSED=0
     READY=0
     RESTART_DETECTED=0
 
     while [ $ELAPSED -lt $TIMEOUT ]; do
-        # Layer 1: Check the container hasn't restart-looped.
-        # "Up" alone is misleading — containers can be restart-looping
-        # silently with restart: unless-stopped. We check RestartCount.
-        local restart_count
-        restart_count=$($DOCKER_CMD inspect --format '{{.RestartCount}}' \
-            vanilla-mangosd 2>/dev/null)
-
-        if [ -n "$restart_count" ] && [ "$restart_count" -gt 0 ] 2>/dev/null; then
-            RESTART_DETECTED=1
+        # Ready signal: mangosd prints "Avg Diff:" once it enters its main update loop.
+        # "World initialized" doesn't appear in CMaNGOS output — Avg Diff is the real signal.
+        if $DOCKER_CMD logs vanilla-mangosd --since 15m 2>&1 | \
+            grep -q "Avg Diff:"; then
+            READY=1
             break
         fi
 
-        # Layer 2: Look for the actual ready signal in logs
-        if $DOCKER_CMD logs vanilla-mangosd 2>&1 | \
-            grep -qE "CMANGOS: World initialized|World initialized in|Server is ready"; then
-            READY=1
+        local restart_count
+        restart_count=$($DOCKER_CMD inspect --format '{{.RestartCount}}' \
+            vanilla-mangosd 2>/dev/null || echo "0")
+
+        # Only declare a restart loop if we see 4+ NEW restarts since this wait started.
+        # A single transient restart during DB stabilization is normal; a loop is not.
+        local new_restarts=$(( restart_count - base_restart_count ))
+        if [ "$new_restarts" -ge 4 ] 2>/dev/null; then
+            RESTART_DETECTED=1
             break
         fi
 
@@ -1424,7 +1469,7 @@ start_server() {
     echo ""
 
     if [ $READY -eq 1 ]; then
-        print_success "World server is online! 🌍"
+        print_success "World server is online!"
         print_info "  Port 8085 (world) and 3724 (login) are listening"
     elif [ $RESTART_DETECTED -eq 1 ]; then
         print_error "mangosd is in a restart loop — boot failed."
@@ -1440,8 +1485,8 @@ start_server() {
         fi
     else
         print_warning "Server taking longer than 10 min to initialize."
-        print_info "It MAY still be loading — check logs: $DOCKER_CMD compose logs -f"
-        print_info "Look for 'CMANGOS: World initialized'"
+        print_info "It may still be loading — check: $DOCKER_CMD logs vanilla-mangosd -f"
+        print_info "Look for 'Avg Diff:' to confirm it's running."
     fi
 }
 
@@ -1537,12 +1582,12 @@ echo "  Waiting for Azeroth to open..."
 echo ""
 
 # Wait for ready (faster after first install)
-TIMEOUT=300
+TIMEOUT=480
 ELAPSED=0
 READY=0
 while [ \$ELAPSED -lt \$TIMEOUT ]; do
-    if docker logs vanilla-mangosd 2>&1 | \
-        grep -qE "World initialized|Server is ready"; then
+    if docker logs vanilla-mangosd --since 15m 2>&1 | \
+        grep -q "Avg Diff:"; then
         READY=1
         break
     fi
@@ -1658,11 +1703,14 @@ show_completion() {
     local realmlist_written=0
 
     # Some repacks put realmlist at top level; standard installs put it
-    # inside Data/enUS/. We check both and write to wherever it lives,
-    # or create it at top level if neither exists.
-    if [ -f "$CLIENT_DIR/Data/enUS/realmlist.wtf" ]; then
-        realmlist_path="$CLIENT_DIR/Data/enUS/realmlist.wtf"
-    fi
+    # inside a locale folder. Check common locales before falling back
+    # to top-level.
+    for _locale in enUS enGB deDE frFR esES esMX ruRU; do
+        if [ -f "$CLIENT_DIR/Data/$_locale/realmlist.wtf" ]; then
+            realmlist_path="$CLIENT_DIR/Data/$_locale/realmlist.wtf"
+            break
+        fi
+    done
 
     if [ -e "$realmlist_path" ] || [ -d "$(dirname "$realmlist_path")" ]; then
         # Unlock first in case it was already chmod 444
