@@ -149,6 +149,7 @@ install_java() {
 
     # Install Java 11 specifically (NOT latest)
     if sudo pacman -Sy --noconfirm jre11-openjdk 2>/dev/null; then
+        sudo steamos-readonly enable 2>/dev/null || true
         print_success "Java 11 installed at /usr/lib/jvm/java-11-openjdk/"
         # Verify Nashorn
         if /usr/lib/jvm/java-11-openjdk/bin/jrunscript -l 2>/dev/null | \
@@ -163,6 +164,7 @@ install_java() {
 
     # If Java 11 unavailable, try the JDK variant
     if sudo pacman -Sy --noconfirm jdk11-openjdk 2>/dev/null; then
+        sudo steamos-readonly enable 2>/dev/null || true
         print_success "JDK 11 installed (heavier than needed but works)"
         return 0
     fi
@@ -170,12 +172,14 @@ install_java() {
     # Last resort: any Java — but warn loudly
     print_warning "Couldn't install Java 11 specifically. Trying latest..."
     if sudo pacman -Sy --noconfirm jre-openjdk 2>/dev/null; then
+        sudo steamos-readonly enable 2>/dev/null || true
         print_warning "Installed default Java — character saves WILL FAIL"
         print_info "Reason: Nashorn (needed by 2009scape) was removed in Java 15"
         print_info "Try: sudo pacman -Sy jre11-openjdk"
         return 0
     fi
 
+    sudo steamos-readonly enable 2>/dev/null || true
     print_error "Java installation failed."
     print_info "Try manually: sudo pacman -Sy jre11-openjdk"
     print_info "Then re-run this installer."
@@ -193,6 +197,7 @@ install_git() {
     sudo pacman -Sy --noconfirm git 2>/dev/null && \
         print_success "Git installed!" || \
         print_warning "Git install failed — continuing anyway"
+    sudo steamos-readonly enable 2>/dev/null || true
 }
 
 install_wmctrl() {
@@ -209,6 +214,7 @@ install_wmctrl() {
     sudo pacman -Sy --noconfirm wmctrl xdotool 2>/dev/null && \
         print_success "Window tools installed!" || \
         print_warning "Window tools install failed — client will use default 765x503 window"
+    sudo steamos-readonly enable 2>/dev/null || true
 }
 
 install_mysql_deps() {
@@ -253,6 +259,7 @@ install_mysql_deps() {
         print_info "If the database fails to start, run manually:"
         print_info "  sudo pacman -Sy libxcrypt-compat libaio"
     fi
+    sudo steamos-readonly enable 2>/dev/null || true
 }
 
 verify_mysqld_libs() {
@@ -337,6 +344,10 @@ clone_server() {
                 print_success "Existing installation looks good — skipping clone"
                 return 0
             fi
+            # Dir exists but DB not initialized — can't clone into it
+            print_error "$SERVER_DIR exists but the database isn't initialized."
+            print_info "Remove it manually and re-run, or choose 'y' above to wipe automatically."
+            exit 1
         fi
     fi
 
