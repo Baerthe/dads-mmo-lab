@@ -755,6 +755,7 @@ extract_client_data() {
         --entrypoint /bin/bash \
         "$SERVER_IMAGE" -c '
             set -e
+            ulimit -s unlimited 2>/dev/null || true
             echo "=== Extraction starting at $(date) ==="
             cd /client
             echo "Working directory: $(pwd)"
@@ -806,13 +807,68 @@ extract_client_data() {
     print_info "    dbc:   $dbc_count files (expect ~150)"
     print_info "    vmaps: $vmaps_count files (expect ~3000+)"
 
+    # ── Segfault recovery: retry vmap extraction separately ──────────
+    # If ExtractResources.sh crashed mid-run (segfault in the map extractor
+    # is a known CMaNGOS issue on some Kalimdor tiles), it exits before the
+    # vmap tool runs — leaving vmaps=0. The vmap extractor reads MPQ files
+    # directly and does NOT depend on successful map extraction, so we can
+    # run it as a standalone retry without re-running the 20-min map step.
+    if [ "$vmaps_count" -lt 100 ] && [ "$dbc_count" -ge 100 ]; then
+        if grep -q "Segmentation fault\|core dumped" /tmp/wow-vanilla-extract.log 2>/dev/null; then
+            print_warning "Extractor crashed with a segmentation fault during map extraction."
+            print_info "Retrying vmap extraction separately — vmaps read MPQ files directly"
+            print_info "and can succeed even after the map extractor crashes."
+            echo ""
+
+            if ! $DOCKER_CMD run --rm \
+                -v "$CLIENT_DIR:/client" \
+                -v "$SERVER_DIR/data:/extracted" \
+                --entrypoint /bin/bash \
+                "$SERVER_IMAGE" -c '
+                    ulimit -s unlimited 2>/dev/null || true
+                    cd /client
+                    echo "=== Vmap retry starting at $(date) ==="
+                    /opt/mangos/bin/tools/vmap4_extractor || true
+                    if [ -d "/client/Buildings" ]; then
+                        mkdir -p /client/vmaps
+                        /opt/mangos/bin/tools/vmap4_assembler Buildings vmaps 2>&1 || true
+                        rm -rf /client/Buildings
+                    fi
+                    if [ -d "/client/vmaps" ] && [ "$(ls /client/vmaps 2>/dev/null | wc -l)" -gt 0 ]; then
+                        echo "Moving /client/vmaps -> /extracted/vmaps"
+                        rm -rf /extracted/vmaps
+                        mv /client/vmaps /extracted/vmaps
+                    fi
+                    echo "=== Vmap retry complete at $(date) ==="
+                    echo "Vmap file count: $(ls /extracted/vmaps 2>/dev/null | wc -l)"
+                ' 2>&1 | tee /tmp/wow-vanilla-vmap-retry.log; then
+                print_warning "Vmap retry reported errors — checking output anyway"
+            fi
+
+            sudo chown -R "$USER:$USER" "$SERVER_DIR/data/vmaps" 2>/dev/null || true
+            vmaps_count=$(ls "$SERVER_DIR/data/vmaps" 2>/dev/null | wc -l)
+            if [ "$vmaps_count" -ge 100 ]; then
+                print_success "Vmap retry succeeded! ($vmaps_count vmap files recovered)"
+            else
+                print_warning "Vmap retry produced $vmaps_count files — still below threshold."
+                print_info "Retry log: /tmp/wow-vanilla-vmap-retry.log"
+            fi
+        fi
+    fi
+
     if [ "$maps_count" -lt 100 ] || [ "$dbc_count" -lt 100 ] || [ "$vmaps_count" -lt 100 ]; then
         print_error "Extraction did not produce enough output files!"
-        print_info "Likely causes:"
-        print_info "  • Client missing Data/dbc.MPQ"
-        print_info "  • Wrong WoW version"
-        print_info "  • Disk full mid-extraction"
-        print_info "Full log: /tmp/wow-vanilla-extract.log"
+        print_info ""
+        if grep -q "Segmentation fault\|core dumped" /tmp/wow-vanilla-extract.log 2>/dev/null; then
+            print_info "  ⚡ DETECTED: Extractor crashed with a segmentation fault."
+            print_info "     This is a known CMaNGOS issue on certain Kalimdor map tiles."
+            print_info "     Common fix: close all other apps to free RAM and re-run."
+        fi
+        [ "$dbc_count" -lt 100 ]   && print_info "  • DBC files low ($dbc_count):   Check that Data/dbc.MPQ exists in your client"
+        [ "$maps_count" -lt 100 ]  && print_info "  • Map files low ($maps_count):  Extraction failed before maps were written"
+        [ "$vmaps_count" -lt 100 ] && print_info "  • Vmap files low ($vmaps_count): Vmap tool crashed or was skipped"
+        print_info ""
+        print_info "Full extract log: /tmp/wow-vanilla-extract.log"
         if ! ask_yes_no "Continue anyway? (server WILL fail to load maps)"; then
             exit 1
         fi
@@ -846,6 +902,7 @@ extract_client_data() {
         -v "$SERVER_DIR/data:/data" \
         --entrypoint /bin/bash \
         "$SERVER_IMAGE" -c '
+            ulimit -s unlimited 2>/dev/null || true
             cd /data
             /opt/mangos/bin/tools/MoveMapGen --silent --threads 2
             echo ""
@@ -1030,15 +1087,21 @@ EOF
         print_success "realmd.conf patched"
     fi
 
-    # ── Playerbots: 1600–2000 random bots ────────────────────────────
+    # ── Playerbots: 600–800 random bots (Steam Deck RAM limit) ──────
     if [ -f "$SERVER_DIR/etc/aiplayerbot.conf" ]; then
-        sed -i "s|^AiPlayerbot\.MinRandomBots .*|AiPlayerbot.MinRandomBots = 1600|" \
+        sed -i "s|^AiPlayerbot\.MinRandomBots .*|AiPlayerbot.MinRandomBots = 600|" \
             "$SERVER_DIR/etc/aiplayerbot.conf"
-        sed -i "s|^AiPlayerbot\.MaxRandomBots .*|AiPlayerbot.MaxRandomBots = 2000|" \
+        sed -i "s|^AiPlayerbot\.MaxRandomBots .*|AiPlayerbot.MaxRandomBots = 800|" \
             "$SERVER_DIR/etc/aiplayerbot.conf"
-        sed -i "s|^AiPlayerbot\.RandomBotAccountCount .*|AiPlayerbot.RandomBotAccountCount = 400|" \
+        sed -i "s|^AiPlayerbot\.RandomBotAccountCount .*|AiPlayerbot.RandomBotAccountCount = 200|" \
             "$SERVER_DIR/etc/aiplayerbot.conf"
-        print_success "aiplayerbot.conf patched (1600–2000 bots, 400 accounts)"
+        sed -i "s|^#\? *AiPlayerbot\.SyncLevelWithPlayers .*|AiPlayerbot.SyncLevelWithPlayers = 1|" \
+            "$SERVER_DIR/etc/aiplayerbot.conf"
+        sed -i "s|^#\? *AiPlayerbot\.SyncLevelMaxAbove .*|AiPlayerbot.SyncLevelMaxAbove = 5|" \
+            "$SERVER_DIR/etc/aiplayerbot.conf"
+        sed -i "s|^#\? *AiPlayerbot\.SyncLevelNoPlayer .*|AiPlayerbot.SyncLevelNoPlayer = 1|" \
+            "$SERVER_DIR/etc/aiplayerbot.conf"
+        print_success "aiplayerbot.conf patched (600–800 bots, 200 accounts, level-synced to player+5)"
     fi
 
     # ── AHBot: high-volume auction house (~15k items target) ─────────
@@ -1703,14 +1766,11 @@ show_completion() {
     local realmlist_written=0
 
     # Some repacks put realmlist at top level; standard installs put it
-    # inside a locale folder. Check common locales before falling back
-    # to top-level.
-    for _locale in enUS enGB deDE frFR esES esMX ruRU; do
-        if [ -f "$CLIENT_DIR/Data/$_locale/realmlist.wtf" ]; then
-            realmlist_path="$CLIENT_DIR/Data/$_locale/realmlist.wtf"
-            break
-        fi
-    done
+    # inside Data/enUS/. We check both and write to wherever it lives,
+    # or create it at top level if neither exists.
+    if [ -f "$CLIENT_DIR/Data/enUS/realmlist.wtf" ]; then
+        realmlist_path="$CLIENT_DIR/Data/enUS/realmlist.wtf"
+    fi
 
     if [ -e "$realmlist_path" ] || [ -d "$(dirname "$realmlist_path")" ]; then
         # Unlock first in case it was already chmod 444
