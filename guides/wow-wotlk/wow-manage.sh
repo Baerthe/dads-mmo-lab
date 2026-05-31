@@ -2686,7 +2686,7 @@ SQLMOD_BACKUP_DIR=""
 
 sqlmod_init() {
     [ -n "$SQLMOD_BASE_DIR" ] && return 0   # already initialised
-    SQLMOD_BASE_DIR="$SERVER_DIR/.sqlmods"
+    SQLMOD_BASE_DIR="$SERVER_DIR/sql_scripts"
     SQLMOD_MARKER_DIR="$SQLMOD_BASE_DIR/installed"
     SQLMOD_CLONE_DIR="$SQLMOD_BASE_DIR/clones"
     SQLMOD_CONFIG_DIR="$SQLMOD_BASE_DIR/config"
@@ -3204,6 +3204,51 @@ _sqlmod_remove_xprates() {
     print_info "Run '.reload config' in-game or restart the world server to apply."
 }
 
+# ── Reapply helper (remove + reinstall without user prompts) ─
+# Used by configure functions to immediately apply config changes.
+# Usage: _sqlmod_reapply <key>
+_sqlmod_reapply() {
+    local key="$1"
+    local name="" url="" type=""
+    local entry
+    for entry in "${SQL_MOD_REGISTRY[@]}"; do
+        IFS='|' read -r k n u t <<< "$entry"
+        if [ "$k" = "$key" ]; then name="$n"; url="$u"; type="$t"; break; fi
+    done
+    [ -z "$name" ] && return 1
+
+    if ! sqlmod_is_installed "$key"; then return 0; fi
+
+    if ! container_running "$DB_CONTAINER"; then
+        print_error "Database container is not running. Cannot reapply $name."
+        print_info "Start the server, then reconfigure to apply changes."
+        return 1
+    fi
+
+    echo ""
+    print_info "Reapplying $name with new configuration..."
+    sqlmod_backup_world || return 1
+
+    case "$type" in
+        clone_sql)      _sqlmod_remove_clone_sql "$key" "$name" ;;
+        clone_sql_pick) _sqlmod_remove_hearthstone "$key" "$name" ;;
+        clone_dist)     _sqlmod_remove_npc_teleporter "$key" "$name" ;;
+        tweak_world)    _sqlmod_remove_tweak "$key" "$name" ;;
+        clone_sql_norevert)
+            rm -f "$SQLMOD_MARKER_DIR/$key.installed"
+            _sqlmod_install_clone_sql "$key" "$name" "$url"
+            return
+            ;;
+    esac
+
+    case "$type" in
+        clone_sql|clone_sql_norevert) _sqlmod_install_clone_sql "$key" "$name" "$url" ;;
+        clone_sql_pick)               _sqlmod_install_hearthstone "$key" "$name" "$url" ;;
+        clone_dist)                   _sqlmod_install_clone_dist "$key" "$name" "$url" ;;
+        tweak_world)                  _sqlmod_install_tweak "$key" "$name" ;;
+    esac
+}
+
 # ── Configure dispatcher ──────────────────────────────────────
 sqlmod_configure() {
     local key="$1" name="$2"
@@ -3224,8 +3269,7 @@ sqlmod_configure() {
 configure_sqlmod_portals() {
     printf '\033[%d;1H\033[J' "$MENU_START_ROW"
     printf "  ${GOLD}── Configure: Portals in All Capitals ──${RST}\n\n"
-    printf "  ${DIM}Adjust GO_TEMPLATE/GO_SPAWN base IDs if they conflict with other mods.${RST}\n"
-    printf "  ${DIM}Changes apply on next (re)install.${RST}\n\n"
+    printf "  ${DIM}Adjust GO_TEMPLATE/GO_SPAWN base IDs if they conflict with other mods.${RST}\n\n"
 
     local cfg_file="$SQLMOD_CONFIG_DIR/portals-capitals.conf"
     local cur_tpl=500000 cur_spn=2000000
@@ -3246,15 +3290,19 @@ configure_sqlmod_portals() {
     fi
 
     printf 'PORTALS_GO_TEMPLATE=%s\nPORTALS_GO_SPAWN=%s\n' "$new_tpl" "$new_spn" > "$cfg_file"
-    print_success "Config saved. Remove + reinstall Portals to apply new IDs."
+    print_success "Configuration saved."
+    if sqlmod_is_installed "portals-capitals"; then
+        _sqlmod_reapply "portals-capitals"
+    else
+        print_info "Install Portals in All Capitals to apply these settings."
+    fi
     press_enter
 }
 
 configure_sqlmod_stackables() {
     printf '\033[%d;1H\033[J' "$MENU_START_ROW"
     printf "  ${GOLD}── Configure: All Stackables ──${RST}\n\n"
-    printf "  ${DIM}Set the maximum stack size. Default is 200.${RST}\n"
-    printf "  ${DIM}Changes apply on next (re)install.${RST}\n\n"
+    printf "  ${DIM}Set the maximum stack size. Default is 200.${RST}\n\n"
 
     local cfg_file="$SQLMOD_CONFIG_DIR/all-stackables.conf"
     local cur_size=200
@@ -3268,7 +3316,12 @@ configure_sqlmod_stackables() {
     if ! [[ "$new_size" =~ ^[0-9]+$ ]]; then print_error "Invalid value."; press_enter; return; fi
 
     printf 'STACKABLES_SIZE=%s\n' "$new_size" > "$cfg_file"
-    print_success "Config saved (stack size = $new_size). Remove + reinstall to apply."
+    print_success "Configuration saved (stack size = $new_size)."
+    if sqlmod_is_installed "all-stackables"; then
+        _sqlmod_reapply "all-stackables"
+    else
+        print_info "Install All Stackables to apply this setting."
+    fi
     press_enter
 }
 
@@ -3301,14 +3354,19 @@ configure_sqlmod_npc_teleporter() {
 
     printf 'NPC_TELEPORTER_ONY_LEVEL=%s\nNPC_TELEPORTER_CAPITAL=%s\nNPC_TELEPORTER_STARTZONE=%s\n' \
         "$new_ony" "$new_capital" "$new_startzone" > "$cfg_file"
-    print_success "Config saved. Remove + reinstall to apply."
+    print_success "Configuration saved."
+    if sqlmod_is_installed "npc-teleporter"; then
+        _sqlmod_reapply "npc-teleporter"
+    else
+        print_info "Install NPC Teleporter to apply these settings."
+    fi
     press_enter
 }
 
 configure_sqlmod_hearthstone() {
     printf '\033[%d;1H\033[J' "$MENU_START_ROW"
     printf "  ${GOLD}── Configure: Hearthstone Cooldowns ──${RST}\n\n"
-    printf "  ${DIM}Select the Hearthstone cooldown. Remove + reinstall to apply.${RST}\n\n"
+    printf "  ${DIM}Select the Hearthstone cooldown.${RST}\n\n"
     printf "  1) 30 minutes (WotLK default)\n"
     printf "  2) 15 minutes\n"
     printf "  3) 5 minutes\n"
@@ -3329,7 +3387,12 @@ configure_sqlmod_hearthstone() {
         4) sel="1min"  ;; 5) sel="1sec"  ;; *) sel="$cur" ;;
     esac
     printf 'HEARTHSTONE_COOLDOWN=%s\n' "$sel" > "$cfg_file"
-    print_success "Config saved ($sel). Remove + reinstall to apply."
+    print_success "Configuration saved ($sel)."
+    if sqlmod_is_installed "hearthstone-cd"; then
+        _sqlmod_reapply "hearthstone-cd"
+    else
+        print_info "Install Hearthstone Cooldown Tweaks to apply this setting."
+    fi
     press_enter
 }
 
@@ -3356,7 +3419,7 @@ configure_sqlmod_tweak() {
     printf '\033[%d;1H\033[J' "$MENU_START_ROW"
     printf "  ${GOLD}── Configure: %s ──${RST}\n\n" "$name"
     printf "  ${DIM}Adjust creature_template multipliers. Leave blank to keep current.${RST}\n"
-    printf "  ${DIM}Values must be positive numbers > 0 (used for reversal on remove).${RST}\n\n"
+    printf "  ${DIM}Values must be positive numbers > 0. Changes apply immediately if installed.${RST}\n\n"
 
     local def_h def_d def_a def_spd
     case "$key" in
@@ -3398,7 +3461,12 @@ configure_sqlmod_tweak() {
 
     printf 'TWEAK_HP_MULT=%s\nTWEAK_DMG_MULT=%s\nTWEAK_ARM_MULT=%s\nTWEAK_SPD_MULT=%s\n' \
         "$new_h" "$new_d" "$new_a" "$new_spd" > "$cfg_file"
-    print_success "Config saved. Install (or remove + reinstall) to apply."
+    print_success "Configuration saved."
+    if sqlmod_is_installed "$key"; then
+        _sqlmod_reapply "$key"
+    else
+        print_info "Install $name to apply these settings."
+    fi
     press_enter
 }
 
