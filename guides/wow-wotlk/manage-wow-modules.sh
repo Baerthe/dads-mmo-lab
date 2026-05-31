@@ -362,7 +362,7 @@ server_start() {
             print_info "Most common causes and fixes:"
             print_info ""
             print_info "  • ${CYAN}'Table X already exists' errors${RST}: a previous module install"
-            print_info "    corrupted update tracking. Use menu option 12 (Repair install state)."
+            print_info "    corrupted update tracking. Use menu option 14 (Repair install state)."
             print_info ""
             print_info "  • ${CYAN}'Permission denied' errors${RST}: UID/GID mismatch on env/dist."
             print_info "    Run: sudo chown -R 1000:1000 env/dist/etc env/dist/logs"
@@ -522,6 +522,25 @@ declare -a MODULE_UPDATE_FILES=(
     "mod-individual-progression|acore_world|"
     "mod-autobalance|acore_world|"
     "mod-ale|acore_world|"
+)
+
+# ALE Lua Script registry.
+# These are Lua scripts that run on the ALE engine — NOT compiled C++ modules.
+# Clones stored in $SERVER_DIR/ale_scripts/<key>/
+# Deployed to  $SERVER_DIR/env/dist/etc/modules/lua_scripts/
+# Format: "key|display name|git url"
+# Special install steps (SQL, client addons, config) are handled per-key
+# inside ale_script_install() and the configure_ale_* functions.
+declare -a ALE_SCRIPT_REGISTRY=(
+    "accountwide|Accountwide Systems (achievements, currency, mounts, pets)|https://github.com/Aldori15/azerothcore-eluna-accountwide.git"
+    "levelupreward|Level Up Reward (mail gold/items on level-up)|https://github.com/55Honey/Acore_LevelUpReward.git"
+    "exchangenpc|Exchange NPC (configurable item-exchange vendor NPC)|https://github.com/55Honey/Acore_ExchangeNpc.git"
+    "activechat|Active Chat (simulated world/guild chat for immersion)|https://github.com/Day36512/ActiveChat.git"
+    "battlepass|Battle Pass System (XP progression + rewards + client addon)|https://github.com/Shonik/lua-battlepass.git"
+    "paragon|Paragon Anniversary (endless post-80 stat progression + client addon)|https://github.com/Grim-Batol/Paragon-Anniversary.git"
+    "bmah|Black Market Auction House (MoP-style BMAH + client addon)|https://github.com/Youpeoples/Black-Market-Auction-House.git"
+    "lootpet|Loot Pet (vanity pet auto-loots nearby corpses)|https://github.com/Brytenwally/Lootpet.git"
+    "sod|Season of Discovery Buffs (phased leveling XP rate bonus)|https://github.com/notepadguyOfficial/acore_sod.git"
 )
 
 # Discover the actual SQL filenames in a module's sql dir.
@@ -808,7 +827,7 @@ repair_install_state() {
     esac
 
     echo ""
-    print_info "Done. Start the server (menu option 7) for AC to re-apply cleared SQL."
+    print_info "Done. Start the server (menu option 9) for AC to re-apply cleared SQL."
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -1132,6 +1151,620 @@ configure_ale() {
 }
 
 # ─────────────────────────────────────────────────────────────
+# ALE LUA SCRIPT MANAGEMENT
+# ─────────────────────────────────────────────────────────────
+# Lua scripts that extend gameplay via the ALE engine.
+# Clones:   $SERVER_DIR/ale_scripts/<key>/
+# Deployed: $SERVER_DIR/env/dist/etc/modules/lua_scripts/
+#           = /azerothcore/env/dist/etc/modules/lua_scripts/ in-container
+
+ale_script_clone_dir()    { echo "$SERVER_DIR/ale_scripts/$1"; }
+ale_script_is_installed() { [ -d "$SERVER_DIR/ale_scripts/$1/.git" ]; }
+ale_lua_scripts_dir()     { echo "$SERVER_DIR/env/dist/etc/modules/lua_scripts"; }
+
+# Ensure the database container is up. Returns 1 if it cannot start.
+ensure_db_running() {
+    refresh_container_names
+    if container_running "$DB_CONTAINER"; then
+        return 0
+    fi
+    print_info "Starting database container..."
+    (cd "$SERVER_DIR" && docker compose up -d ac-database 2>/dev/null) || true
+    refresh_container_names
+    local i
+    for i in $(seq 1 15); do
+        if docker exec "$DB_CONTAINER" mysqladmin ping \
+            -uroot -p"$DB_ROOT_PASSWORD" &>/dev/null 2>&1; then
+            print_success "Database is up."
+            return 0
+        fi
+        sleep 2
+    done
+    print_error "Database did not become ready."
+    return 1
+}
+
+# Run a SQL file against a named database. DB must be running.
+# Usage: ale_run_sql_file <db_name> <path_to_sql_file>
+ale_run_sql_file() {
+    local db_name="$1" sql_file="$2"
+    if [ ! -f "$sql_file" ]; then
+        print_warning "SQL file not found: $sql_file"
+        return 1
+    fi
+    print_info "Applying SQL: $(basename "$sql_file") → $db_name"
+    if docker exec -i "$DB_CONTAINER" mysql \
+        -uroot -p"$DB_ROOT_PASSWORD" "$db_name" < "$sql_file" 2>&1; then
+        print_success "SQL applied: $(basename "$sql_file")"
+    else
+        print_warning "SQL had errors — table may already exist, which is usually safe."
+    fi
+}
+
+# ── Per-script post-install configuration ────────────────────
+
+configure_ale_battlepass() {
+    local clone_dir
+    clone_dir=$(ale_script_clone_dir "battlepass")
+
+    print_step "Battle Pass — SQL & Configuration"
+
+    # Apply SQL
+    print_info "Applying Battle Pass SQL (requires database to be running)..."
+    if ensure_db_running; then
+        ale_run_sql_file "acore_world"      "$clone_dir/sql/battlepass_world.sql"
+        ale_run_sql_file "acore_characters" "$clone_dir/sql/battlepass_characters.sql"
+    else
+        print_warning "Skipping SQL — apply manually when the database is running:"
+        print_info "  $clone_dir/sql/battlepass_world.sql      → acore_world"
+        print_info "  $clone_dir/sql/battlepass_characters.sql → acore_characters"
+    fi
+
+    # Interactive config updates to battlepass_config table
+    if container_running "$DB_CONTAINER"; then
+        echo ""
+        print_info "Configure Battle Pass settings (press ENTER to keep defaults):"
+        echo ""
+        local max_level exp_per_level debug_mode
+        printf "${WHITE}  Max Battle Pass level     [100]: ${RST}"; read -r max_level
+        printf "${WHITE}  Base XP required per level [1000]: ${RST}"; read -r exp_per_level
+        printf "${WHITE}  Enable debug logging  (0=off/1=on) [0]: ${RST}"; read -r debug_mode
+        max_level=${max_level:-100}
+        exp_per_level=${exp_per_level:-1000}
+        debug_mode=${debug_mode:-0}
+
+        docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
+            -e "UPDATE battlepass_config SET value='$max_level'    WHERE \`key\`='max_level';
+                UPDATE battlepass_config SET value='$exp_per_level' WHERE \`key\`='exp_per_level';
+                UPDATE battlepass_config SET value='$debug_mode'   WHERE \`key\`='debug_mode';" \
+            2>/dev/null \
+            || print_warning "Config update failed — edit battlepass_config table manually."
+        print_success "Battle Pass config applied."
+    fi
+
+    # Client addon
+    echo ""
+    print_step "Battle Pass — Client Addon Required"
+    echo -e "${WHITE}The Battle Pass system includes a WoW client addon for the in-game UI.${RST}"
+    echo ""
+    echo -e "${WHITE}${BOLD}Copy this folder to your WoW client's AddOns directory:${RST}"
+    echo -e "  ${CYAN}Source:${RST}      $clone_dir/BattlePass/"
+    echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/BattlePass/"
+    echo ""
+    echo -e "${WHITE}Use ${CYAN}/bp${WHITE} or ${CYAN}/battlepass${WHITE} in-game to open the Battle Pass frame.${RST}"
+    echo -e "${WHITE}Player commands: ${CYAN}.bp${WHITE} | ${CYAN}.bp rewards${WHITE} | ${CYAN}.bp claim <level>${RST}"
+}
+
+configure_ale_paragon() {
+    local clone_dir
+    clone_dir=$(ale_script_clone_dir "paragon")
+
+    print_step "Paragon Anniversary — SQL Migrations Required"
+    echo ""
+    echo -e "${WHITE}Paragon Anniversary requires SQL files to be applied BEFORE first startup.${RST}"
+    echo -e "${WHITE}Tables are NOT auto-created — you must run these migrations manually.${RST}"
+    echo ""
+    if ensure_db_running; then
+        local paragon_sql_dir="$clone_dir/sql"
+        local sql_files
+        sql_files=$(find "$paragon_sql_dir" -name "*.sql" 2>/dev/null | sort)
+        if [ -n "$sql_files" ]; then
+            print_info "Found SQL files in $paragon_sql_dir:"
+            echo "$sql_files" | while read -r f; do echo "    - $(basename "$f")"; done
+            echo ""
+            if ask_yes_no "Apply all Paragon SQL files to acore_world now?"; then
+                echo "$sql_files" | while read -r f; do
+                    ale_run_sql_file "acore_world" "$f"
+                done
+            else
+                print_warning "Apply SQL manually before starting the server:"
+                echo "$sql_files" | while read -r f; do
+                    print_info "  mysql acore_world < $f"
+                done
+            fi
+        else
+            print_warning "No SQL files found in $paragon_sql_dir"
+            print_info "Check the repo's sql/ directory and apply required migrations."
+        fi
+    else
+        print_warning "Database not available. Apply SQL files from $clone_dir/sql/ manually."
+    fi
+
+    echo ""
+    print_step "Paragon Anniversary — Configuration Guide"
+    echo ""
+    echo -e "${WHITE}${BOLD}Key settings — edit in the ${CYAN}paragon_config${WHITE}${BOLD} database table:${RST}"
+    echo ""
+    printf "  ${CYAN}%-38s${RST} ${WHITE}%s${RST}\n" "LEVEL_LINKED_TO_ACCOUNT" "0 = per-character  |  1 = account-wide shared XP"
+    printf "  ${CYAN}%-38s${RST} ${WHITE}%s${RST}\n" "PARAGON_LEVEL_CAP"        "Max paragon level (0 = unlimited)"
+    printf "  ${CYAN}%-38s${RST} ${WHITE}%s${RST}\n" "BASE_MAX_EXPERIENCE"      "XP needed per level (multiplied by paragon level)"
+    printf "  ${CYAN}%-38s${RST} ${WHITE}%s${RST}\n" "POINTS_PER_LEVEL"         "Stat points awarded each paragon level"
+    printf "  ${CYAN}%-38s${RST} ${WHITE}%s${RST}\n" "UNIVERSAL_CREATURE_EXPERIENCE" "Default XP per creature kill (default: 50)"
+    echo ""
+    echo -e "${DIM}Full install guide: $clone_dir/doc/INSTALL.md${RST}"
+
+    # Client addon
+    echo ""
+    print_step "Paragon Anniversary — Client Addon Required"
+    echo -e "${WHITE}Paragon includes a WoW client addon for the in-game progression UI.${RST}"
+    echo ""
+    echo -e "${WHITE}${BOLD}Find the addon folder in the cloned repo and copy it to AddOns:${RST}"
+    echo -e "  ${CYAN}Look in:${RST}     $clone_dir/"
+    echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/ParagonAnniversary/"
+    echo ""
+    echo -e "${DIM}The addon communicates with the server via the ParagonAnniversary protocol.${RST}"
+}
+
+configure_ale_bmah() {
+    local clone_dir
+    clone_dir=$(ale_script_clone_dir "bmah")
+    local lua_dir
+    lua_dir=$(ale_lua_scripts_dir)
+    local deployed_file="$lua_dir/bmah_server.lua"
+
+    print_step "Black Market AH — NPC Configuration"
+    echo ""
+    echo -e "${WHITE}The BMAH needs a gossip-enabled NPC in-world to act as the vendor.${RST}"
+    echo -e "${WHITE}Its entry ID(s) must be added to the ${CYAN}BMAH_VENDOR_NPCs${WHITE} list in bmah_server.lua.${RST}"
+    echo -e "${DIM}The list format is: local BMAH_VENDOR_NPCs = { 2069430, 90001, ... }${RST}"
+    echo ""
+
+    if [ -f "$deployed_file" ]; then
+        printf "${WHITE}Enter your gossip NPC entry ID to add [90001]: ${RST}"
+        read -r npc_id
+        npc_id=${npc_id:-90001}
+        if [[ "$npc_id" =~ ^[0-9]+$ ]]; then
+            # Append the new ID into the existing brace-enclosed list
+            if sed -i "s/local BMAH_VENDOR_NPCs = {/local BMAH_VENDOR_NPCs = { $npc_id,/" \
+                "$deployed_file" 2>/dev/null && \
+               grep -q "$npc_id" "$deployed_file"; then
+                print_success "Added NPC $npc_id to BMAH_VENDOR_NPCs list."
+            else
+                print_warning "Auto-patch failed or NPC already present. Edit manually:"
+                print_info "  File: $deployed_file"
+                print_info "  Add ${CYAN}$npc_id${RST} to: local BMAH_VENDOR_NPCs = { ... }"
+            fi
+        else
+            print_warning "Invalid entry ID — edit $deployed_file manually."
+        fi
+    else
+        print_warning "bmah_server.lua not found at expected path:"
+        print_info "  $deployed_file"
+        print_info "Deploy the script first, then edit BMAH_VENDOR_NPCs at the top of the file."
+    fi
+
+    echo ""
+    echo -e "${WHITE}Additional config (in bmah_server.lua):${RST}"
+    printf "  ${CYAN}%-22s${RST} ${WHITE}%s${RST}\n" "common_price"    "Starting bid for common items"
+    printf "  ${CYAN}%-22s${RST} ${WHITE}%s${RST}\n" "rare_price"      "Starting bid for rare items"
+    printf "  ${CYAN}%-22s${RST} ${WHITE}%s${RST}\n" "ultra_rare_price" "Starting bid for ultra-rare items"
+    echo ""
+    echo -e "${WHITE}GM commands: ${CYAN}/bmah flush${WHITE} (expire all) | ${CYAN}/bmah fill${WHITE} (refill immediately)${RST}"
+
+    # Client addon
+    echo ""
+    print_step "Black Market AH — Client Addon Required"
+    echo -e "${WHITE}BMAH includes a WoW addon that recreates the Mists of Pandaria BMAH UI.${RST}"
+    echo ""
+    echo -e "${WHITE}${BOLD}Copy this folder to your WoW client's AddOns directory:${RST}"
+    echo -e "  ${CYAN}Source:${RST}      $clone_dir/BlackMarketUI/"
+    echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/BlackMarketUI/"
+    echo ""
+    echo -e "${WHITE}After copying, run ${CYAN}/reload${WHITE} or restart the WoW client.${RST}"
+}
+
+# ── Lua file deployment (per-script copy strategy) ───────────
+# Each script has its own repo layout; this handles the mapping.
+ale_deploy_lua_files() {
+    local key="$1" clone_dir="$2"
+    local lua_dir
+    lua_dir=$(ale_lua_scripts_dir)
+    mkdir -p "$lua_dir"
+
+    case "$key" in
+        accountwide)
+            # Upstream layout: lua_scripts/AccountWide/*.lua
+            local src="$clone_dir/lua_scripts/AccountWide"
+            if [ -d "$src" ]; then
+                mkdir -p "$lua_dir/accountwide"
+                cp "$src"/*.lua "$lua_dir/accountwide/" && \
+                    print_success "Deployed → lua_scripts/accountwide/" || \
+                    print_warning "Copy failed — check $src"
+            else
+                print_warning "Expected directory not found: $src"
+                print_info "Manually copy .lua files to: $lua_dir/accountwide/"
+            fi
+            ;;
+        levelupreward)
+            local count=0
+            if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
+                count=$(ls "$clone_dir"/*.lua 2>/dev/null | wc -l | tr -d ' ')
+                print_success "Deployed $count file(s) → lua_scripts/"
+            else
+                print_warning "No .lua files found in clone root — check $clone_dir"
+            fi
+            ;;
+        exchangenpc)
+            local count=0
+            if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
+                count=$(ls "$clone_dir"/*.lua 2>/dev/null | wc -l | tr -d ' ')
+                print_success "Deployed $count file(s) → lua_scripts/"
+            else
+                print_warning "No .lua files found in clone root — check $clone_dir"
+            fi
+            ;;
+        activechat)
+            # Upstream layout: ActiveChat/ subdirectory
+            local src="$clone_dir/ActiveChat"
+            if [ -d "$src" ]; then
+                mkdir -p "$lua_dir/activechat"
+                cp -r "$src"/. "$lua_dir/activechat/" && \
+                    print_success "Deployed → lua_scripts/activechat/" || \
+                    print_warning "Copy failed — check $src"
+            else
+                print_warning "Expected directory not found: $src"
+                print_info "Manually copy ActiveChat/ contents to: $lua_dir/activechat/"
+            fi
+            ;;
+        battlepass)
+            if [ -d "$clone_dir/lua_scripts" ]; then
+                cp -r "$clone_dir/lua_scripts/." "$lua_dir/" && \
+                    print_success "Deployed → lua_scripts/ (lib/CSMH + battlepass/)" || \
+                    print_warning "Copy failed — check $clone_dir/lua_scripts"
+            else
+                print_warning "lua_scripts/ dir not found in clone — check $clone_dir manually."
+            fi
+            ;;
+        paragon)
+            # Upstream layout: serverside/paragon/
+            local src="$clone_dir/serverside/paragon"
+            if [ -d "$src" ]; then
+                cp -r "$src" "$lua_dir/" && \
+                    print_success "Deployed → lua_scripts/paragon/" || \
+                    print_warning "Copy failed — check $src"
+            else
+                print_warning "Expected directory not found: $src"
+                print_info "Manually copy paragon/ contents to: $lua_dir/paragon/"
+            fi
+            ;;
+        bmah)
+            # Upstream layout: Server Files/lua_scripts/bmah_server.lua
+            local src="$clone_dir/Server Files/lua_scripts/bmah_server.lua"
+            if [ -f "$src" ]; then
+                cp "$src" "$lua_dir/" && \
+                    print_success "Deployed bmah_server.lua → lua_scripts/" || \
+                    print_warning "Copy failed — check '$src'"
+            else
+                print_warning "Expected file not found: $src"
+                print_info "Manually copy bmah_server.lua to: $lua_dir/"
+            fi
+            ;;
+        lootpet)
+            if [ -f "$clone_dir/LootPet.lua" ]; then
+                cp "$clone_dir/LootPet.lua" "$lua_dir/" && \
+                    print_success "Deployed LootPet.lua → lua_scripts/" || \
+                    print_warning "Copy failed"
+            else
+                print_warning "LootPet.lua not found in $clone_dir"
+            fi
+            ;;
+        sod)
+            local count=0
+            if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
+                count=$(ls "$clone_dir"/*.lua 2>/dev/null | wc -l | tr -d ' ')
+                print_success "Deployed $count file(s) → lua_scripts/"
+            else
+                print_warning "No .lua files found in clone root — check $clone_dir"
+            fi
+            ;;
+        *)
+            if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
+                print_success "Deployed → lua_scripts/ (generic copy)"
+            else
+                print_warning "No .lua files found in $clone_dir — check repo layout manually."
+            fi
+            ;;
+    esac
+}
+
+# Clone/update, deploy Lua files, run per-script extras.
+ale_script_install() {
+    local key="$1" name="$2" url="$3"
+    local clone_dir
+    clone_dir=$(ale_script_clone_dir "$key")
+
+    print_step "Installing ALE script: $name"
+
+    mkdir -p "$SERVER_DIR/ale_scripts"
+    if ale_script_is_installed "$key"; then
+        print_info "Already cloned — pulling latest..."
+        (cd "$clone_dir" && git pull --depth 1 2>/dev/null) || \
+            print_warning "git pull failed — using existing copy"
+    else
+        if ! git clone --depth 1 "$url" "$clone_dir"; then
+            print_error "Clone failed for $name!"
+            return 1
+        fi
+        print_success "Cloned $name"
+    fi
+
+    ale_deploy_lua_files "$key" "$clone_dir"
+
+    # Per-script extra steps
+    case "$key" in
+        accountwide)
+            echo ""
+            print_warning "Install on a FRESH server is strongly recommended."
+            print_info "00_AccountWideUtils.lua is required alongside all other Accountwide"
+            print_info "scripts — it has been deployed with the rest in lua_scripts/accountwide/."
+            echo ""
+            print_info "Accountwide requires a characters DB schema."
+            if ask_yes_no "Apply Accountwide characters SQL now?"; then
+                if ensure_db_running; then
+                    local sql_file="$clone_dir/sql/create_accountwide_tables.sql"
+                    if [ -f "$sql_file" ]; then
+                        ale_run_sql_file "acore_characters" "$sql_file"
+                    else
+                        # Fallback: search for the file if name changed upstream
+                        local found
+                        found=$(find "$clone_dir/sql" -name "*.sql" 2>/dev/null | head -1)
+                        if [ -n "$found" ]; then
+                            ale_run_sql_file "acore_characters" "$found"
+                        else
+                            print_warning "SQL file not found in $clone_dir/sql/"
+                        fi
+                    fi
+                fi
+            else
+                print_info "Apply manually: mysql acore_characters < $clone_dir/sql/create_accountwide_tables.sql"
+            fi
+            ;;
+        exchangenpc)
+            echo ""
+            print_info "Exchange NPC requires a world SQL file to be applied."
+            if ask_yes_no "Apply Exchange NPC world SQL now?"; then
+                if ensure_db_running; then
+                    # Prefer the *_Up.sql (install) variant; avoid Down/Revert scripts
+                    local sql_file
+                    sql_file=$(find "$clone_dir" -name "*_Up.sql" 2>/dev/null | head -1)
+                    if [ -z "$sql_file" ]; then
+                        # Fallback: any SQL that isn't a rollback
+                        sql_file=$(find "$clone_dir" -name "*.sql" 2>/dev/null \
+                            | grep -v -i "down\|revert" | head -1)
+                    fi
+                    if [ -n "$sql_file" ]; then
+                        ale_run_sql_file "acore_world" "$sql_file"
+                    else
+                        print_warning "No install SQL file found in $clone_dir"
+                        print_info "Manually apply the *_Up.sql file from the repo."
+                    fi
+                fi
+            fi
+            echo ""
+            print_info "After restart, teleport to the NPC: ${CYAN}.go zonexy 51.1 27.7 976${RST}"
+            ;;
+        battlepass)
+            echo ""
+            if ask_yes_no "Configure Battle Pass SQL and settings now?"; then
+                configure_ale_battlepass
+            else
+                print_info "Run option 6 → C 5 to reconfigure Battle Pass later."
+                print_info "Remember to apply SQL manually from:"
+                print_info "  $clone_dir/sql/"
+            fi
+            ;;
+        paragon)
+            echo ""
+            if ask_yes_no "Show Paragon Anniversary configuration guide now?"; then
+                configure_ale_paragon
+            fi
+            ;;
+        bmah)
+            echo ""
+            if ask_yes_no "Configure Black Market AH (NPC ID + client addon info) now?"; then
+                configure_ale_bmah
+            fi
+            ;;
+    esac
+
+    echo ""
+    print_info "Reload Lua scripts in-game with: ${CYAN}.reload ale${RST}"
+    print_info "Or restart the worldserver from the main menu."
+    return 0
+}
+
+ale_script_remove() {
+    local key="$1" name="$2"
+    local clone_dir
+    clone_dir=$(ale_script_clone_dir "$key")
+    local lua_dir
+    lua_dir=$(ale_lua_scripts_dir)
+
+    print_step "Removing ALE script: $name"
+
+    if ! ale_script_is_installed "$key"; then
+        print_info "$name is not installed — nothing to do."
+        return 0
+    fi
+
+    # For scripts whose deployed filenames come from the clone, collect them BEFORE removal
+    local -a generic_deployed_files=()
+    case "$key" in
+        levelupreward|exchangenpc|sod)
+            while IFS= read -r f; do
+                generic_deployed_files+=("$(basename "$f")")
+            done < <(find "$clone_dir" -maxdepth 1 -name "*.lua" 2>/dev/null)
+            ;;
+    esac
+
+    if ask_yes_no "Remove clone at $clone_dir?"; then
+        rm -rf "$clone_dir"
+        print_success "Clone removed."
+    fi
+
+    # Offer to remove deployed Lua files
+    local deployed_hint
+    case "$key" in
+        accountwide) deployed_hint="$lua_dir/accountwide/" ;;
+        activechat)  deployed_hint="$lua_dir/activechat/" ;;
+        battlepass)  deployed_hint="$lua_dir/battlepass/  and  $lua_dir/lib/" ;;
+        paragon)     deployed_hint="$lua_dir/paragon/" ;;
+        bmah)        deployed_hint="$lua_dir/bmah_server.lua" ;;
+        lootpet)     deployed_hint="$lua_dir/LootPet.lua" ;;
+        *)           deployed_hint="$lua_dir/ (search for files from this script)" ;;
+    esac
+
+    echo ""
+    print_info "Deployed files: $deployed_hint"
+    if ask_yes_no "Also remove deployed Lua files from lua_scripts/?"; then
+        case "$key" in
+            accountwide) rm -rf "$lua_dir/accountwide" ;;
+            activechat)  rm -rf "$lua_dir/activechat" ;;
+            battlepass)  rm -rf "$lua_dir/battlepass" "$lua_dir/lib" ;;
+            paragon)     rm -rf "$lua_dir/paragon" ;;
+            bmah)        rm -f  "$lua_dir/bmah_server.lua" ;;
+            lootpet)     rm -f  "$lua_dir/LootPet.lua" ;;
+            levelupreward|exchangenpc|sod)
+                local f
+                for f in "${generic_deployed_files[@]}"; do
+                    rm -f "$lua_dir/$f" 2>/dev/null || true
+                done
+                ;;
+        esac
+        print_success "Deployed files removed."
+    fi
+
+    print_info "(Database tables created by this script are kept — removing them risks data loss.)"
+}
+
+# ── ALE Scripts submenu ───────────────────────────────────────
+menu_ale_scripts() {
+    while true; do
+        print_header
+        print_step "ALE Lua Scripts"
+
+        if ! module_is_installed "mod-ale"; then
+            echo ""
+            print_error "mod-ale (ALE Lua Engine) is not installed!"
+            print_info "Install it via main menu option 1 (Add modules),"
+            print_info "then configure via option 5 before installing Lua scripts."
+            echo ""
+            press_enter; return
+        fi
+
+        echo ""
+        echo -e "${WHITE}Available ALE Lua scripts:${RST}"
+        echo ""
+
+        local i=1
+        local -a available_entries=()
+        local entry key name url marker
+        for entry in "${ALE_SCRIPT_REGISTRY[@]}"; do
+            IFS='|' read -r key name url <<< "$entry"
+            if ale_script_is_installed "$key"; then
+                marker="${GREEN}[installed]${RST}"
+            else
+                marker="${YELLOW}[available]${RST}"
+            fi
+            printf "  %2d) %-50s %b\n" "$i" "$name" "$marker"
+            available_entries+=("$entry")
+            i=$((i + 1))
+        done
+
+        echo ""
+        echo -e "  ${GOLD}── Actions ──${RST}"
+        echo -e "${WHITE}    I <nums>  Install scripts  (e.g. I 1 3 5)${RST}"
+        echo -e "${WHITE}    R <num>   Remove a script  (e.g. R 2)${RST}"
+        echo -e "${WHITE}    C <num>   Reconfigure      (e.g. C 5 for battlepass)${RST}"
+        echo -e "${WHITE}    ENTER     Back to main menu${RST}"
+        echo ""
+        printf "${WHITE}Choice: ${RST}"
+        read -r raw_choice
+
+        [ -z "$raw_choice" ] && return
+
+        local action nums c
+        action="${raw_choice:0:1}"
+        nums="${raw_choice:2}"
+
+        case "${action,,}" in
+            i)
+                local -a to_install=()
+                for c in $nums; do
+                    if [[ "$c" =~ ^[0-9]+$ ]] && \
+                       [ "$c" -ge 1 ] && [ "$c" -le "${#available_entries[@]}" ]; then
+                        to_install+=("${available_entries[$((c - 1))]}")
+                    fi
+                done
+                if [ "${#to_install[@]}" -eq 0 ]; then
+                    print_warning "No valid script numbers — e.g. I 1 3 5"
+                    press_enter; continue
+                fi
+                for entry in "${to_install[@]}"; do
+                    IFS='|' read -r key name url <<< "$entry"
+                    ale_script_install "$key" "$name" "$url" || true
+                    echo ""
+                done
+                press_enter
+                ;;
+            r)
+                local rnum
+                rnum=$(echo "$nums" | tr -d ' ')
+                if ! [[ "$rnum" =~ ^[0-9]+$ ]] || \
+                   [ "$rnum" -lt 1 ] || [ "$rnum" -gt "${#available_entries[@]}" ]; then
+                    print_warning "Invalid script number — e.g. R 2"
+                    press_enter; continue
+                fi
+                IFS='|' read -r key name url <<< "${available_entries[$((rnum - 1))]}"
+                ale_script_remove "$key" "$name"
+                press_enter
+                ;;
+            c)
+                local cnum
+                cnum=$(echo "$nums" | tr -d ' ')
+                if ! [[ "$cnum" =~ ^[0-9]+$ ]] || \
+                   [ "$cnum" -lt 1 ] || [ "$cnum" -gt "${#available_entries[@]}" ]; then
+                    print_warning "Invalid script number — e.g. C 5"
+                    press_enter; continue
+                fi
+                IFS='|' read -r key name url <<< "${available_entries[$((cnum - 1))]}"
+                case "$key" in
+                    battlepass) configure_ale_battlepass ;;
+                    paragon)    configure_ale_paragon ;;
+                    bmah)       configure_ale_bmah ;;
+                    *) print_info "No dedicated reconfigure for $name." ;;
+                esac
+                press_enter
+                ;;
+            *)
+                print_warning "Unknown command. Use I <nums>, R <num>, C <num>, or ENTER."
+                press_enter
+                ;;
+        esac
+    done
+}
+
+# ─────────────────────────────────────────────────────────────
 # MAIN MENUS
 # ─────────────────────────────────────────────────────────────
 menu_add() {
@@ -1377,8 +2010,8 @@ show_first_run_welcome() {
     echo -e "${WHITE}${BOLD}A few things to know:${RST}"
     echo ""
     echo -e "${GREEN}  ✓${RST} ${WHITE}Nothing changes until you explicitly choose an action.${RST}"
-    echo -e "${WHITE}    The menu options 3 (List modules), 7 (Server status),${RST}"
-    echo -e "${WHITE}    and 11 (View logs) are completely read-only — safe to${RST}"
+    echo -e "${WHITE}    The menu options 3 (List modules), 8 (Server status),${RST}"
+    echo -e "${WHITE}    and 12 (View logs) are completely read-only — safe to${RST}"
     echo -e "${WHITE}    poke around and see what your install looks like.${RST}"
     echo ""
     echo -e "${GREEN}  ✓${RST} ${WHITE}You'll be asked before anything destructive.${RST}"
@@ -1389,19 +2022,19 @@ show_first_run_welcome() {
     echo -e "${WHITE}    On Steam Deck this takes 30-90 minutes. Plug in and${RST}"
     echo -e "${WHITE}    keep the device on a flat surface for airflow.${RST}"
     echo ""
-    echo -e "${GREEN}  ✓${RST} ${WHITE}The repair function (option 13) only clears SQL update${RST}"
+    echo -e "${GREEN}  ✓${RST} ${WHITE}The repair function (option 14) only clears SQL update${RST}"
     echo -e "${WHITE}    tracking rows. It never drops database tables.${RST}"
     echo ""
     if [ "$user_module_count" -eq 0 ]; then
         echo -e "${WHITE}${BOLD}Suggested first steps for a fresh install:${RST}"
-        echo -e "${WHITE}  1. Option ${CYAN}7${WHITE} (Server status) — see what containers are running${RST}"
+        echo -e "${WHITE}  1. Option ${CYAN}8${WHITE} (Server status) — see what containers are running${RST}"
         echo -e "${WHITE}  2. Option ${CYAN}3${WHITE} (List modules) — see what's installed${RST}"
         echo -e "${WHITE}  3. When ready: option ${CYAN}1${WHITE} (Add modules) — add AH Bot, etc.${RST}"
     else
         echo -e "${WHITE}${BOLD}Useful options for an existing install:${RST}"
         echo -e "${WHITE}  • Option ${CYAN}3${WHITE} (List modules) — see what's already installed${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}7${WHITE} (Server status) — check container state${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}13${WHITE} (Repair) — if ac-db-import is failing${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}8${WHITE} (Server status) — check container state${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}14${WHITE} (Repair) — if ac-db-import is failing${RST}"
     fi
     echo ""
     echo -e "${DIM}This welcome shows once per install. The marker file at${RST}"
@@ -1439,18 +2072,19 @@ main_menu() {
         echo -e "${WHITE}    3) List installed modules${RST}"
         echo -e "${WHITE}    4) Configure / reconfigure AH Bot${RST}"
         echo -e "${WHITE}    5) Configure / reconfigure ALE (Lua Engine)${RST}"
-        echo -e "${WHITE}    6) Rebuild worldserver${RST}"
+        echo -e "${WHITE}    6) ALE Lua Scripts${RST}"
+        echo -e "${WHITE}    7) Rebuild worldserver${RST}"
         echo ""
         echo -e "  ${GOLD}── Server Controls ──${RST}"
-        echo -e "${WHITE}    7) Server status${RST}"
-        echo -e "${WHITE}    8) Start server${RST}"
-        echo -e "${WHITE}    9) Stop server${RST}"
-        echo -e "${WHITE}   10) Restart server${RST}"
-        echo -e "${WHITE}   11) View worldserver logs${RST}"
-        echo -e "${WHITE}   12) Attach to worldserver console${RST}"
+        echo -e "${WHITE}    8) Server status${RST}"
+        echo -e "${WHITE}    9) Start server${RST}"
+        echo -e "${WHITE}   10) Stop server${RST}"
+        echo -e "${WHITE}   11) Restart server${RST}"
+        echo -e "${WHITE}   12) View worldserver logs${RST}"
+        echo -e "${WHITE}   13) Attach to worldserver console${RST}"
         echo ""
         echo -e "  ${GOLD}── Troubleshooting ──${RST}"
-        echo -e "${WHITE}   13) Repair install state (clear stuck SQL update tracking)${RST}"
+        echo -e "${WHITE}   14) Repair install state (clear stuck SQL update tracking)${RST}"
         echo ""
         echo -e "${WHITE}    Q) Quit${RST}"
         echo ""
@@ -1462,14 +2096,15 @@ main_menu() {
             3)  menu_list ;;
             4)  configure_ahbot; press_enter ;;
             5)  configure_ale; press_enter ;;
-            6)  rebuild_worldserver; press_enter ;;
-            7)  server_status; press_enter ;;
-            8)  server_start; press_enter ;;
-            9)  server_stop; press_enter ;;
-            10) server_restart; press_enter ;;
-            11) server_logs ;;
-            12) server_attach; press_enter ;;
-            13) repair_install_state; press_enter ;;
+            6)  menu_ale_scripts ;;
+            7)  rebuild_worldserver; press_enter ;;
+            8)  server_status; press_enter ;;
+            9)  server_start; press_enter ;;
+            10) server_stop; press_enter ;;
+            11) server_restart; press_enter ;;
+            12) server_logs ;;
+            13) server_attach; press_enter ;;
+            14) repair_install_state; press_enter ;;
             q)  echo ""; print_info "Goodbye!"; exit 0 ;;
         esac
     done
