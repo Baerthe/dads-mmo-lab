@@ -173,6 +173,8 @@ start_logo_animation() {
         "$_LOGO_L4" "$_LOGO_L5" "$_LOGO_L6" "$_LOGO_L7" &
     ANIM_PID=$!
 
+    printf '\033[%d;1H\033[K  \033[2mPress any key to skip...\033[0m' "$MENU_START_ROW"
+
     # Wait up to 3 seconds — any keypress skips immediately
     read -r -s -t 3 2>/dev/null || true
 
@@ -517,7 +519,7 @@ server_start() {
             print_info "Most common causes and fixes:"
             print_info ""
             print_info "  • ${CYAN}'Table X already exists' errors${RST}: a previous module install"
-            print_info "    corrupted update tracking. Use menu option 14 (Repair install state)."
+            print_info "    corrupted update tracking. Use menu option 12 (Repair install state)."
             print_info ""
             print_info "  • ${CYAN}'Permission denied' errors${RST}: UID/GID mismatch on env/dist."
             print_info "    Run: sudo chown -R 1000:1000 env/dist/etc env/dist/logs"
@@ -982,7 +984,7 @@ repair_install_state() {
     esac
 
     echo ""
-    print_info "Done. Start the server (menu option 9) for AC to re-apply cleared SQL."
+    print_info "Done. Start the server (menu option 7) for AC to re-apply cleared SQL."
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -1414,13 +1416,16 @@ configure_ale_battlepass() {
         exp_per_level=${exp_per_level:-1000}
         debug_mode=${debug_mode:-0}
 
-        docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
+        if docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
             -e "UPDATE battlepass_config SET value='$max_level'    WHERE \`key\`='max_level';
                 UPDATE battlepass_config SET value='$exp_per_level' WHERE \`key\`='exp_per_level';
                 UPDATE battlepass_config SET value='$debug_mode'   WHERE \`key\`='debug_mode';" \
-            2>/dev/null \
-            || print_warning "Config update failed — edit battlepass_config table manually."
-        print_success "Battle Pass config applied."
+            2>/dev/null; then
+            print_success "Battle Pass config applied."
+        else
+            print_warning "Config update failed — the battlepass_config table may not exist yet."
+            print_info "Run the SQL files above first, then reconfigure via option C."
+        fi
     fi
 
     # Client addon
@@ -1749,7 +1754,7 @@ ale_script_install() {
             if ask_yes_no "Configure Battle Pass SQL and settings now?"; then
                 configure_ale_battlepass
             else
-                print_info "Run option 6 → C 5 to reconfigure Battle Pass later."
+                print_info "Run option 4 → c5 to reconfigure Battle Pass later."
                 print_info "Remember to apply SQL manually from:"
                 print_info "  $clone_dir/sql/"
             fi
@@ -1840,32 +1845,31 @@ ale_script_remove() {
 
 # ── ALE Scripts submenu ───────────────────────────────────────
 menu_ale_scripts() {
+    local page_start=0
     while true; do
+        local tlines; tlines=$(tput lines 2>/dev/null || echo 24)
+
         # Clear menu area
         printf '\033[%d;1H\033[J' "$MENU_START_ROW"
 
         if ! module_is_installed "mod-ale"; then
             printf "  ${RED}✗ mod-ale (ALE Lua Engine) is not installed.${RST}\n"
-            printf "  ${WHITE}Install via main menu option 1, then configure via option 5.${RST}\n"
+            printf "  ${WHITE}Install via main menu option 1, then configure via option 3.${RST}\n"
             printf "\n  ${DIM}Press ENTER to return...${RST}\n"
             read -r _
             return
         fi
 
-        # Build script list with status markers
+        # Build full list with status markers
         local -a available_entries=()
-        local i=1 entry key name url marker cloned deployed
-
-        printf "  ${GOLD}── ALE Lua Scripts ──────────────────────────────${RST}\n"
-        printf "  ${DIM}%-4s %-38s %s${RST}\n" "Num" "Script" "Status"
-        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        local -a markers=()
+        local entry key name url cloned deployed marker
 
         for entry in "${ALE_SCRIPT_REGISTRY[@]}"; do
             IFS='|' read -r key name url <<< "$entry"
             cloned=false; deployed=false
             ale_script_is_installed "$key" && cloned=true
             ale_lua_is_deployed     "$key" && deployed=true
-
             if $deployed && $cloned; then
                 marker="${GREEN}✓ Installed${RST}"
             elif $deployed; then
@@ -1876,36 +1880,82 @@ menu_ale_scripts() {
                 marker="${DIM}○ Not installed${RST}"
             fi
             available_entries+=("$entry")
-            printf "  ${WHITE}%2d)${RST} %-38s %b\n" "$i" "$name" "$marker"
-            i=$(( i + 1 ))
+            markers+=("$marker")
+        done
+
+        local total=${#available_entries[@]}
+
+        # Fixed rows: header + col-header + top-div + bottom-div + help + page-bar = 6
+        local avail=$(( tlines - MENU_START_ROW - 1 ))
+        local page_size=$(( avail - 6 ))
+        [ "$page_size" -lt 3 ] && page_size=3
+
+        local max_start=$(( total - page_size ))
+        [ "$max_start" -lt 0 ] && max_start=0
+        [ "$page_start" -gt "$max_start" ] && page_start=$max_start
+        [ "$page_start" -lt 0 ] && page_start=0
+
+        local page_end=$(( page_start + page_size ))
+        [ "$page_end" -gt "$total" ] && page_end=$total
+        local total_pages=$(( (total + page_size - 1) / page_size ))
+        local current_page=$(( page_start / page_size + 1 ))
+
+        printf "  ${GOLD}── ALE Lua Scripts ──────────────────────────────${RST}\n"
+        printf "  ${DIM}%-4s %-38s %s${RST}\n" "Num" "Script" "Status"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+
+        local idx
+        for (( idx=page_start; idx<page_end; idx++ )); do
+            IFS='|' read -r key name url <<< "${available_entries[$idx]}"
+            printf "  ${WHITE}%2d)${RST} %-38s %b\n" "$(( idx + 1 ))" "$name" "${markers[$idx]}"
         done
 
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
-        printf "  ${WHITE}I <nums>${RST} Install   ${WHITE}R <num>${RST} Remove   ${WHITE}C <num>${RST} Config   ${WHITE}ENTER${RST} Back\n"
+        if [ "$total_pages" -gt 1 ]; then
+            local nav="  ${DIM}Page $current_page/$total_pages${RST}"
+            [ "$current_page" -gt 1 ]              && nav+="   ${WHITE}< prev${RST}"
+            [ "$current_page" -lt "$total_pages" ]  && nav+="   ${WHITE}> next${RST}"
+            printf "%b\n" "$nav"
+        fi
+        printf "  ${WHITE}i<nums>${RST} Install   ${WHITE}r<num>${RST} Remove   ${WHITE}c<num>${RST} Config   ${WHITE}ENTER${RST} Back\n"
 
-        # Input at second-to-last terminal row
-        local _tlines; _tlines=$(tput lines 2>/dev/null || echo 24)
-        local _irow=$(( _tlines - 1 ))
-        _read_menu_input "$_irow"
+        _read_menu_input "$(( tlines - 1 ))"
         local raw_choice="$_MENU_INPUT"
 
         [ -z "$raw_choice" ] && return
 
         local action nums c
         action="${raw_choice:0:1}"
-        nums="${raw_choice:2}"
+        nums="${raw_choice:1}"
 
         case "${action,,}" in
+            '<')
+                page_start=$(( page_start - page_size ))
+                [ "$page_start" -lt 0 ] && page_start=0
+                ;;
+            '>')
+                page_start=$(( page_start + page_size ))
+                [ "$page_start" -gt "$max_start" ] && page_start=$max_start
+                ;;
             i)
+                local -a num_tokens=()
+                if [[ "$nums" =~ ^[0-9]+$ ]] && [ "${#nums}" -gt 1 ]; then
+                    local ch
+                    for (( ch=0; ch<${#nums}; ch++ )); do
+                        num_tokens+=("${nums:$ch:1}")
+                    done
+                else
+                    read -r -a num_tokens <<< "$nums"
+                fi
                 local -a to_install=()
-                for c in $nums; do
+                for c in "${num_tokens[@]}"; do
                     if [[ "$c" =~ ^[0-9]+$ ]] && \
-                       [ "$c" -ge 1 ] && [ "$c" -le "${#available_entries[@]}" ]; then
+                       [ "$c" -ge 1 ] && [ "$c" -le "$total" ]; then
                         to_install+=("${available_entries[$((c - 1))]}")
                     fi
                 done
                 if [ "${#to_install[@]}" -eq 0 ]; then
-                    print_warning "No valid script numbers — e.g. I 1 3 5"
+                    print_warning "No valid script numbers — e.g. i135"
                     press_enter; continue
                 fi
                 for entry in "${to_install[@]}"; do
@@ -1916,11 +1966,10 @@ menu_ale_scripts() {
                 press_enter
                 ;;
             r)
-                local rnum
-                rnum=$(echo "$nums" | tr -d ' ')
+                local rnum; rnum=$(echo "$nums" | tr -d ' ')
                 if ! [[ "$rnum" =~ ^[0-9]+$ ]] || \
-                   [ "$rnum" -lt 1 ] || [ "$rnum" -gt "${#available_entries[@]}" ]; then
-                    print_warning "Invalid script number — e.g. R 2"
+                   [ "$rnum" -lt 1 ] || [ "$rnum" -gt "$total" ]; then
+                    print_warning "Invalid script number — e.g. r2"
                     press_enter; continue
                 fi
                 IFS='|' read -r key name url <<< "${available_entries[$((rnum - 1))]}"
@@ -1928,11 +1977,10 @@ menu_ale_scripts() {
                 press_enter
                 ;;
             c)
-                local cnum
-                cnum=$(echo "$nums" | tr -d ' ')
+                local cnum; cnum=$(echo "$nums" | tr -d ' ')
                 if ! [[ "$cnum" =~ ^[0-9]+$ ]] || \
-                   [ "$cnum" -lt 1 ] || [ "$cnum" -gt "${#available_entries[@]}" ]; then
-                    print_warning "Invalid script number — e.g. C 5"
+                   [ "$cnum" -lt 1 ] || [ "$cnum" -gt "$total" ]; then
+                    print_warning "Invalid script number — e.g. c5"
                     press_enter; continue
                 fi
                 IFS='|' read -r key name url <<< "${available_entries[$((cnum - 1))]}"
@@ -1945,7 +1993,7 @@ menu_ale_scripts() {
                 press_enter
                 ;;
             *)
-                print_warning "Unknown command. Use I <nums>, R <num>, C <num>, or ENTER."
+                print_warning "Unknown command. Use i<nums>, r<num>, c<num>, or ENTER."
                 press_enter
                 ;;
         esac
@@ -1955,199 +2003,221 @@ menu_ale_scripts() {
 # ─────────────────────────────────────────────────────────────
 # MAIN MENUS
 # ─────────────────────────────────────────────────────────────
-menu_add() {
-    print_header
-    print_step "Add Modules"
 
-    # Show clear warning for non-playerbots installs
-    if [ "$SERVER_TYPE" != "playerbots" ]; then
-        echo ""
-        print_warning "Module installs on $SERVER_NAME are experimental."
-        print_info "Modules will be cloned, but rebuilding the worldserver"
-        print_info "to actually USE them is not supported on this install type."
-        print_info ""
-        print_info "Recommended: reinstall as Playerbots variant for full module support."
-        echo ""
-        if ! ask_yes_no "Continue anyway (modules will be cloned but inactive)?"; then
-            return
-        fi
-    fi
+# ── Unified module browser ────────────────────────────────────
+# i <nums>  Install one or more (space-separated)
+# r <num>   Remove one
+# ENTER     Return to main menu
+menu_modules() {
+    local page_start=0
+    while true; do
+        local tlines; tlines=$(tput lines 2>/dev/null || echo 24)
 
-    echo ""
-    echo -e "${WHITE}Available modules:${RST}"
-    echo ""
+        # Build full registry list (always done fresh for current status)
+        local -a available_entries=()
+        local -a markers=()
+        local entry key name url sql_dirs marker
 
-    local i=1
-    local -a available_keys=()
-    local entry key name url sql_dirs marker
-    for entry in "${MODULE_REGISTRY[@]}"; do
-        IFS='|' read -r key name url sql_dirs <<< "$entry"
-        if module_is_installed "$key"; then
-            marker="${GREEN}[installed]${RST}"
-        else
-            marker="${YELLOW}[available]${RST}"
-        fi
-        printf "  %2d) %-42s %b\n" "$i" "$name" "$marker"
-        available_keys+=("$entry")
-        i=$((i + 1))
-    done
-    echo ""
-    echo -e "${WHITE}  Enter numbers separated by spaces (e.g. 1 3 5)${RST}"
-    echo -e "${WHITE}  Or just ENTER to cancel.${RST}"
-    echo ""
-    printf "${WHITE}Choose: ${RST}"
-    read -r choices
-
-    [ -z "$choices" ] && return
-
-    local selected=()
-    local choice
-    for choice in $choices; do
-        if [[ "$choice" =~ ^[0-9]+$ ]] && \
-           [ "$choice" -ge 1 ] && [ "$choice" -le "${#available_keys[@]}" ]; then
-            selected+=("${available_keys[$((choice - 1))]}")
-        fi
-    done
-
-    if [ "${#selected[@]}" -eq 0 ]; then
-        print_warning "No valid choices."
-        press_enter; return
-    fi
-
-    for entry in "${selected[@]}"; do
-        IFS='|' read -r key name url sql_dirs <<< "$entry"
-        module_install "$key" "$name" "$url" "$sql_dirs" || true
-    done
-
-    echo ""
-    print_info "Modules cloned and SQL imported."
-
-    if [ "$SERVER_TYPE" = "playerbots" ]; then
-        print_info "Rebuild the worldserver to compile the new modules in."
-        echo ""
-        if ask_yes_no "Rebuild the worldserver now?"; then
-            rebuild_worldserver
-        else
-            print_info "Run me again later and pick Rebuild from the main menu."
-        fi
-    else
-        print_info "(Skipping rebuild prompt — not supported on this install type.)"
-    fi
-
-    # Special handling: AH Bot needs character configuration after add
-    for entry in "${selected[@]}"; do
-        IFS='|' read -r key name url sql_dirs <<< "$entry"
-        if [ "$key" = "mod-ah-bot" ]; then
-            echo ""
-            print_info "AH Bot is installed but not yet configured."
-            if ask_yes_no "Configure AH Bot now (assign a bot character)?"; then
-                configure_ahbot
-            fi
-        fi
-        if [ "$key" = "mod-ale" ]; then
-            echo ""
-            print_info "ALE requires post-install setup (lua_scripts dir + conf)."
-            if ask_yes_no "Configure ALE now?"; then
-                configure_ale
-            fi
-        fi
-    done
-
-    press_enter
-}
-
-menu_remove() {
-    print_header
-    print_step "Remove Modules"
-
-    echo ""
-    echo -e "${WHITE}Installed modules:${RST}"
-    echo ""
-
-    local i=1
-    local -a installed_keys=()
-    local entry key name
-    for entry in "${MODULE_REGISTRY[@]}"; do
-        IFS='|' read -r key name _ _ <<< "$entry"
-        if module_is_installed "$key"; then
-            printf "  %2d) %s\n" "$i" "$name"
-            installed_keys+=("$entry")
-            i=$((i + 1))
-        fi
-    done
-
-    if [ "${#installed_keys[@]}" -eq 0 ]; then
-        echo "  (none)"
-        press_enter; return
-    fi
-
-    echo ""
-    printf "${WHITE}Number to remove (or ENTER to cancel): ${RST}"
-    read -r choice
-
-    [ -z "$choice" ] && return
-    if ! [[ "$choice" =~ ^[0-9]+$ ]] || \
-       [ "$choice" -lt 1 ] || [ "$choice" -gt "${#installed_keys[@]}" ]; then
-        print_warning "Invalid choice."
-        press_enter; return
-    fi
-
-    IFS='|' read -r key name _ _ <<< "${installed_keys[$((choice - 1))]}"
-    module_remove "$key" "$name"
-
-    if [ "$SERVER_TYPE" = "playerbots" ]; then
-        echo ""
-        print_info "Rebuild needed for module removal to take effect."
-        if ask_yes_no "Rebuild the worldserver now?"; then
-            rebuild_worldserver
-        fi
-    fi
-
-    press_enter
-}
-
-menu_list() {
-    print_header
-    print_step "Installed Modules"
-
-    if [ ! -d "$SERVER_DIR/modules" ]; then
-        echo "  (no modules directory yet)"
-        press_enter; return
-    fi
-
-    local count=0
-    local entry key name
-    for entry in "${MODULE_REGISTRY[@]}"; do
-        IFS='|' read -r key name _ _ <<< "$entry"
-        if module_is_installed "$key"; then
-            printf "  %-30s — %s\n" "$key" "$name"
-            count=$((count + 1))
-        fi
-    done
-
-    # Catch modules NOT in our registry (manually added, or e.g. mod-playerbots)
-    local d dn in_registry
-    for d in "$SERVER_DIR/modules"/*/; do
-        [ -d "$d" ] || continue
-        dn=$(basename "$d")
-        in_registry=false
         for entry in "${MODULE_REGISTRY[@]}"; do
-            IFS='|' read -r key _ _ _ <<< "$entry"
-            if [ "$key" = "$dn" ]; then
-                in_registry=true
-                break
+            IFS='|' read -r key name url sql_dirs <<< "$entry"
+            if module_is_installed "$key"; then
+                marker="${GREEN}✓ Installed${RST}"
+            else
+                marker="${DIM}○ Not installed${RST}"
             fi
+            available_entries+=("$entry")
+            markers+=("$marker")
         done
-        if [ "$in_registry" = false ]; then
-            local note="(manually added)"
-            [ "$dn" = "mod-playerbots" ] && note="(bundled with Playerbots install)"
-            printf "  ${DIM}%-30s — %s${RST}\n" "$dn" "$note"
-            count=$((count + 1))
-        fi
-    done
 
-    [ "$count" -eq 0 ] && echo "  (none installed)"
-    press_enter
+        local total=${#available_entries[@]}
+
+        # Collect unregistered modules (read-only info section)
+        local -a other_modules=()
+        local -a other_notes=()
+        if [ -d "$SERVER_DIR/modules" ]; then
+            local d dn in_registry
+            for d in "$SERVER_DIR/modules"/*/; do
+                [ -d "$d" ] || continue
+                dn=$(basename "$d")
+                in_registry=false
+                for entry in "${MODULE_REGISTRY[@]}"; do
+                    IFS='|' read -r key _ _ _ <<< "$entry"
+                    [ "$key" = "$dn" ] && { in_registry=true; break; }
+                done
+                if [ "$in_registry" = false ]; then
+                    local note="manually added"
+                    [ "$dn" = "mod-playerbots" ] && note="bundled"
+                    other_modules+=("$dn")
+                    other_notes+=("$note")
+                fi
+            done
+        fi
+
+        # Fixed rows: header(1) + col-header(1) + top-div(1) + bottom-div(1) + help(1) + page-bar(1) = 6
+        # Reserve extra rows for "other" section if present: divider(1) + label(1) + items
+        local other_count=${#other_modules[@]}
+        local other_rows=$(( other_count > 0 ? other_count + 2 : 0 ))
+        local avail=$(( tlines - MENU_START_ROW - 1 ))
+        local page_size=$(( avail - 6 - other_rows ))
+        [ "$page_size" -lt 3 ] && page_size=3
+        # If "other" section doesn't fit, drop it from the calculation
+        if [ "$page_size" -lt 3 ]; then
+            other_rows=0
+            page_size=$(( avail - 6 ))
+            [ "$page_size" -lt 3 ] && page_size=3
+        fi
+
+        local max_start=$(( total - page_size ))
+        [ "$max_start" -lt 0 ] && max_start=0
+        [ "$page_start" -gt "$max_start" ] && page_start=$max_start
+        [ "$page_start" -lt 0 ] && page_start=0
+
+        local page_end=$(( page_start + page_size ))
+        [ "$page_end" -gt "$total" ] && page_end=$total
+        local total_pages=$(( (total + page_size - 1) / page_size ))
+        local current_page=$(( page_start / page_size + 1 ))
+
+        # Clear and draw
+        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+        printf "  ${GOLD}── Modules ──────────────────────────────────────${RST}\n"
+        printf "  ${DIM}%-4s %-42s %s${RST}\n" "Num" "Module" "Status"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+
+        local idx
+        for (( idx=page_start; idx<page_end; idx++ )); do
+            IFS='|' read -r key name url sql_dirs <<< "${available_entries[$idx]}"
+            printf "  ${WHITE}%2d)${RST} %-42s %b\n" "$(( idx + 1 ))" "$name" "${markers[$idx]}"
+        done
+
+        # Show unregistered modules if space allows
+        if [ "$other_rows" -gt 0 ] && [ "${#other_modules[@]}" -gt 0 ]; then
+            printf "  ${DIM}──────────────────────────────────────────────────${RST}\n"
+            printf "  ${DIM}Other installed:${RST}\n"
+            local oi
+            for (( oi=0; oi<${#other_modules[@]}; oi++ )); do
+                printf "  ${DIM}     %-42s (%s)${RST}\n" "${other_modules[$oi]}" "${other_notes[$oi]}"
+            done
+        fi
+
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        if [ "$total_pages" -gt 1 ]; then
+            local nav="  ${DIM}Page $current_page/$total_pages${RST}"
+            [ "$current_page" -gt 1 ]              && nav+="   ${WHITE}< prev${RST}"
+            [ "$current_page" -lt "$total_pages" ]  && nav+="   ${WHITE}> next${RST}"
+            printf "%b\n" "$nav"
+        fi
+        printf "  ${WHITE}i <nums>${RST} Install   ${WHITE}r <num>${RST} Remove   ${WHITE}ENTER${RST} Back\n"
+
+        _read_menu_input "$(( tlines - 1 ))"
+        local raw_choice="$_MENU_INPUT"
+
+        [ -z "$raw_choice" ] && return
+
+        local action nums
+        action="${raw_choice:0:1}"
+        nums="${raw_choice:1}"
+        nums="${nums# }"
+
+        case "${action,,}" in
+            '<')
+                page_start=$(( page_start - page_size ))
+                [ "$page_start" -lt 0 ] && page_start=0
+                ;;
+            '>')
+                page_start=$(( page_start + page_size ))
+                [ "$page_start" -gt "$max_start" ] && page_start=$max_start
+                ;;
+            i)
+                if [ -z "$nums" ]; then
+                    print_warning "Specify numbers — e.g. i 1 3"
+                    press_enter; continue
+                fi
+
+                if [ "$SERVER_TYPE" != "playerbots" ]; then
+                    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                    print_warning "Module installs on $SERVER_NAME are experimental."
+                    print_info "Modules will be cloned but rebuilding is not supported on this install type."
+                    print_info "Recommended: reinstall as Playerbots for full module support."
+                    echo ""
+                    if ! ask_yes_no "Continue anyway?"; then continue; fi
+                fi
+
+                local -a to_install=()
+                local c
+                for c in $nums; do
+                    if [[ "$c" =~ ^[0-9]+$ ]] && \
+                       [ "$c" -ge 1 ] && [ "$c" -le "$total" ]; then
+                        to_install+=("${available_entries[$((c - 1))]}")
+                    fi
+                done
+
+                if [ "${#to_install[@]}" -eq 0 ]; then
+                    print_warning "No valid module numbers — e.g. i 1 3"
+                    press_enter; continue
+                fi
+
+                printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                for entry in "${to_install[@]}"; do
+                    IFS='|' read -r key name url sql_dirs <<< "$entry"
+                    module_install "$key" "$name" "$url" "$sql_dirs" || true
+                    echo ""
+                done
+                print_info "Modules cloned and SQL imported."
+
+                if [ "$SERVER_TYPE" = "playerbots" ]; then
+                    print_info "Rebuild the worldserver to compile the new modules in."
+                    echo ""
+                    if ask_yes_no "Rebuild the worldserver now?"; then
+                        rebuild_worldserver
+                    fi
+                else
+                    print_info "(Skipping rebuild — not supported on this install type.)"
+                fi
+
+                for entry in "${to_install[@]}"; do
+                    IFS='|' read -r key name _ _ <<< "$entry"
+                    if [ "$key" = "mod-ah-bot" ]; then
+                        echo ""
+                        print_info "AH Bot installed — configure a bot character?"
+                        if ask_yes_no "Configure AH Bot now?"; then configure_ahbot; fi
+                    fi
+                    if [ "$key" = "mod-ale" ]; then
+                        echo ""
+                        print_info "ALE requires post-install setup (lua_scripts dir + conf)."
+                        if ask_yes_no "Configure ALE now?"; then configure_ale; fi
+                    fi
+                done
+                press_enter
+                ;;
+            r)
+                local rnum; rnum=$(echo "$nums" | tr -d ' ')
+                if ! [[ "$rnum" =~ ^[0-9]+$ ]] || \
+                   [ "$rnum" -lt 1 ] || [ "$rnum" -gt "$total" ]; then
+                    print_warning "Invalid module number — e.g. r2"
+                    press_enter; continue
+                fi
+                IFS='|' read -r key name _ _ <<< "${available_entries[$((rnum - 1))]}"
+                if ! module_is_installed "$key"; then
+                    print_warning "$name is not installed."
+                    press_enter; continue
+                fi
+                printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                module_remove "$key" "$name"
+                if [ "$SERVER_TYPE" = "playerbots" ]; then
+                    echo ""
+                    print_info "Rebuild needed for module removal to take effect."
+                    if ask_yes_no "Rebuild the worldserver now?"; then
+                        rebuild_worldserver
+                    fi
+                fi
+                press_enter
+                ;;
+            *)
+                print_warning "Unknown command. Use i <nums>, r <num>, or ENTER."
+                press_enter
+                ;;
+        esac
+    done
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -2200,9 +2270,8 @@ show_first_run_welcome() {
     echo -e "${WHITE}${BOLD}A few things to know:${RST}"
     echo ""
     echo -e "${GREEN}  ✓${RST} ${WHITE}Nothing changes until you explicitly choose an action.${RST}"
-    echo -e "${WHITE}    The menu options 3 (List modules), 8 (Server status),${RST}"
-    echo -e "${WHITE}    and 12 (View logs) are completely read-only — safe to${RST}"
-    echo -e "${WHITE}    poke around and see what your install looks like.${RST}"
+    echo -e "${WHITE}    Option 6 (Server status) and 10 (View logs) are read-only${RST}"
+    echo -e "${WHITE}    — safe to poke around and see what your install looks like.${RST}"
     echo ""
     echo -e "${GREEN}  ✓${RST} ${WHITE}You'll be asked before anything destructive.${RST}"
     echo -e "${WHITE}    Adding/removing modules, rebuilding the worldserver, and${RST}"
@@ -2212,19 +2281,18 @@ show_first_run_welcome() {
     echo -e "${WHITE}    On Steam Deck this takes 30-90 minutes. Plug in and${RST}"
     echo -e "${WHITE}    keep the device on a flat surface for airflow.${RST}"
     echo ""
-    echo -e "${GREEN}  ✓${RST} ${WHITE}The repair function (option 14) only clears SQL update${RST}"
+    echo -e "${GREEN}  ✓${RST} ${WHITE}The repair function (option 12) only clears SQL update${RST}"
     echo -e "${WHITE}    tracking rows. It never drops database tables.${RST}"
     echo ""
     if [ "$user_module_count" -eq 0 ]; then
         echo -e "${WHITE}${BOLD}Suggested first steps for a fresh install:${RST}"
-        echo -e "${WHITE}  1. Option ${CYAN}8${WHITE} (Server status) — see what containers are running${RST}"
-        echo -e "${WHITE}  2. Option ${CYAN}3${WHITE} (List modules) — see what's installed${RST}"
-        echo -e "${WHITE}  3. When ready: option ${CYAN}1${WHITE} (Add modules) — add AH Bot, etc.${RST}"
+        echo -e "${WHITE}  1. Option ${CYAN}6${WHITE} (Server status) — see what containers are running${RST}"
+        echo -e "${WHITE}  2. Option ${CYAN}1${WHITE} (Modules) — browse and install modules${RST}"
     else
         echo -e "${WHITE}${BOLD}Useful options for an existing install:${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}3${WHITE} (List modules) — see what's already installed${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}8${WHITE} (Server status) — check container state${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}14${WHITE} (Repair) — if ac-db-import is failing${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}1${WHITE} (Modules) — browse installed and available modules${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}6${WHITE} (Server status) — check container state${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}12${WHITE} (Repair) — if ac-db-import is failing${RST}"
     fi
     echo ""
     echo -e "${DIM}This welcome shows once per install. The marker file at${RST}"
@@ -2261,22 +2329,20 @@ main_menu() {
             "$(basename "$SERVER_DIR")" "$state_str" "$build_str"
         printf "\n  ${GOLD}${BOLD}Server Modifications${RST}\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
-        printf "  ${WHITE} 1)${RST} Add modules\n"
-        printf "  ${WHITE} 2)${RST} Remove modules\n"
-        printf "  ${WHITE} 3)${RST} List installed modules\n"
-        printf "  ${WHITE} 4)${RST} Configure AH Bot\n"
-        printf "  ${WHITE} 5)${RST} Configure ALE\n"
-        printf "  ${WHITE} 6)${RST} ALE Lua Scripts\n"
+        printf "  ${WHITE}1)${RST} Manage Modules\n"
+        printf "  ${WHITE}2)${RST} Manage ALE Lua\n"
+        printf "  ${WHITE}3)${RST} Configure AH Bot\n"
+        printf "  ${WHITE}4)${RST} Configure ALE\n"
+        printf "  ${WHITE}5)${RST} Rebuild worldserver\n"
         printf "\n  ${GOLD}${BOLD}Server Controls${RST}\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
-        printf "  ${WHITE} 7)${RST} Rebuild worldserver\n"
-        printf "  ${WHITE} 8)${RST} Server status\n"
-        printf "  ${WHITE} 9)${RST} Start server\n"
-        printf "  ${WHITE}10)${RST} Stop server\n"
-        printf "  ${WHITE}11)${RST} Restart server\n"
-        printf "  ${WHITE}12)${RST} View logs\n"
-        printf "  ${WHITE}13)${RST} Attach to console\n"
-        printf "  ${WHITE}14)${RST} Repair install state\n"
+        printf "  ${WHITE}6)${RST} Server status\n"
+        printf "  ${WHITE}7)${RST} Start server\n"
+        printf "  ${WHITE}8)${RST} Stop server\n"
+        printf "  ${WHITE}9)${RST} Restart server\n"
+        printf "  ${WHITE}10)${RST} View logs\n"
+        printf "  ${WHITE}11)${RST} Attach to console\n"
+        printf "  ${WHITE}12)${RST} Repair install state\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${GOLD} Q)${RST} Quit\n"
 
@@ -2287,20 +2353,18 @@ main_menu() {
         local choice="${_MENU_INPUT,,}"
 
         case "$choice" in
-            1)  menu_add ;;
-            2)  menu_remove ;;
-            3)  menu_list ;;
-            4)  configure_ahbot; press_enter ;;
-            5)  configure_ale; press_enter ;;
-            6)  menu_ale_scripts ;;
-            7)  rebuild_worldserver; press_enter ;;
-            8)  server_status; press_enter ;;
-            9)  server_start; press_enter ;;
-            10) server_stop; press_enter ;;
-            11) server_restart; press_enter ;;
-            12) with_full_screen server_logs ;;
-            13) with_full_screen server_attach ;;
-            14) repair_install_state; press_enter ;;
+            1)  menu_modules ;;
+            2)  menu_ale_scripts ;;
+            3)  configure_ahbot; press_enter ;;
+            4)  configure_ale; press_enter ;;
+            5)  rebuild_worldserver; press_enter ;;
+            6)  server_status; press_enter ;;
+            7)  server_start; press_enter ;;
+            8)  server_stop; press_enter ;;
+            9)  server_restart; press_enter ;;
+            10) with_full_screen server_logs ;;
+            11) with_full_screen server_attach ;;
+            12) repair_install_state; press_enter ;;
             q)  echo ""; print_info "Goodbye!"; exit 0 ;;
         esac
     done
