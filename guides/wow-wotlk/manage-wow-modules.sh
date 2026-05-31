@@ -26,7 +26,7 @@
 #  https://github.com/DadsMmoLab/dads-mmo-lab
 # ============================================================
 
-MANAGER_VERSION="2.0.0"
+MANAGER_VERSION="2.1.0 - ALE Drinker Edition"
 
 set -o pipefail
 
@@ -40,11 +40,107 @@ GOLD='\033[38;5;220m'; DIM='\033[2m'
 # ─────────────────────────────────────────────────────────────
 print_header() {
     clear
+    local F1='\033[38;5;220m'   # gold   — top
+    local F2='\033[38;5;214m'   # amber
+    local F3='\033[38;5;208m'   # orange
+    local F4='\033[38;5;202m'   # red-orange
+    local F5='\033[38;5;196m'   # red    — base (hottest)
     echo ""
-    echo -e "${GOLD}╔══════════════════════════════════════════════════╗${RST}"
-    echo -e "${GOLD}║${WHITE}${BOLD}    🛠️  DAD'S MMO LAB — WoW Module Manager       ${RST}${GOLD}║${RST}"
-    echo -e "${GOLD}║${WHITE}        v${MANAGER_VERSION}                                    ${RST}${GOLD}║${RST}"
-    echo -e "${GOLD}╚══════════════════════════════════════════════════╝${RST}"
+    echo -e "${DIM}                           ▄▄  ▄█                                                                                        ${RST}"
+    echo -e "${F1}▀███▀▀▀██▄               ▀███  ██           ▀████▄     ▄███▀████▄     ▄███▀ ▄▄█▀▀██▄     ▀████▀         ██     ▀███▀▀▀██▄${RST}"
+    echo -e "${F1}  ██    ▀██▄               ██  ▀▀             ████    ████   ████    ████ ▄██▀    ▀██▄     ██          ▄██▄      ██    ██${RST}"
+    echo -e "${F2}  ██     ▀██▄█▀██▄    ▄█▀▀███     ▄██▀███     █ ██   ▄█ ██   █ ██   ▄█ ██ ██▀      ▀██     ██         ▄█▀██▄     ██    ██${RST}"
+    echo -e "${F2}  ██      ███   ██  ▄██    ██     ██   ▀▀     █  ██  █▀ ██   █  ██  █▀ ██ ██        ██     ██        ▄█  ▀██     ██▀▀▀█▄▄${RST}"
+    echo -e "${F3}  ██     ▄██▄█████  ███    ██     ▀█████▄     █  ██▄█▀  ██   █  ██▄█▀  ██ ██▄      ▄██     ██     ▄  ████████    ██    ▀█${RST}"
+    echo -e "${F4}  ██    ▄██▀█   ██  ▀██    ██     █▄   ██     █  ▀██▀   ██   █  ▀██▀   ██ ▀██▄    ▄██▀     ██    ▄█ █▀      ██   ██    ▄█${RST}"
+    echo -e "${F5}▄████████▀ ▀████▀██▄ ▀████▀███▄   ██████▀   ▄███▄ ▀▀  ▄████▄███▄ ▀▀  ▄████▄ ▀▀████▀▀     █████████████▄   ▄████▄████████${RST}"
+    echo ""
+    echo -e "${F1}   ══════════════════════════════════════════════════════════════════════════════════${RST}"
+    echo -e "   ${DIM}WoW Module Manager${RST}  ✦  ${DIM}v${MANAGER_VERSION}${RST}"
+    echo -e "${F1}   ══════════════════════════════════════════════════════════════════════════════════${RST}"
+    echo ""
+}
+
+# One-shot animated intro — heat blaze effect. Stay hot James >:)
+# Plays once at startup; print_header() is used for all subsequent redraws.
+animate_intro() {
+    clear
+
+    # The 8 logo lines (index 0 = tiny top accent, 7 = base / hottest)
+    local -a L=(
+        "                           ▄▄  ▄█                                                                                        "
+        "▀███▀▀▀██▄               ▀███  ██           ▀████▄     ▄███▀████▄     ▄███▀ ▄▄█▀▀██▄     ▀████▀         ██     ▀███▀▀▀██▄"
+        "  ██    ▀██▄               ██  ▀▀             ████    ████   ████    ████ ▄██▀    ▀██▄     ██          ▄██▄      ██    ██"
+        "  ██     ▀██▄█▀██▄    ▄█▀▀███     ▄██▀███     █ ██   ▄█ ██   █ ██   ▄█ ██ ██▀      ▀██     ██         ▄█▀██▄     ██    ██"
+        "  ██      ███   ██  ▄██    ██     ██   ▀▀     █  ██  █▀ ██   █  ██  █▀ ██ ██        ██     ██        ▄█  ▀██     ██▀▀▀█▄▄"
+        "  ██     ▄██▄█████  ███    ██     ▀█████▄     █  ██▄█▀  ██   █  ██▄█▀  ██ ██▄      ▄██     ██     ▄  ████████    ██    ▀█"
+        "  ██    ▄██▀█   ██  ▀██    ██     █▄   ██     █  ▀██▀   ██   █  ▀██▀   ██ ▀██▄    ▄██▀     ██    ▄█ █▀      ██   ██    ▄█"
+        "▄████████▀ ▀████▀██▄ ▀████▀███▄   ██████▀   ▄███▄ ▀▀  ▄████▄███▄ ▀▀  ▄████▄ ▀▀████▀▀     █████████████▄   ▄████▄████████"
+    )
+    local llen=${#L[@]}  # 8
+
+    # Extended palette — cycling through this simulates rising heat bands.
+    # 196=red → 202 → 208=orange → 214=amber → 220=gold → 226=bright → back down
+    local -a P=(196 196 202 202 208 208 214 214 220 220 226 220 214 208 202)
+    local plen=${#P[@]}  # 15
+
+    # Shimmer offsets — three phases that alternate to create the "blaze" ripple.
+    # Each entry is the palette-index nudge applied to a line when it's in phase.
+    local -a SHIMMER=(0 1 2 1 0)
+    local shimmer_len=5
+
+    # Hide cursor during animation; restore it no matter how we exit
+    printf '\033[?25l'
+    trap 'printf "\033[?25h"' EXIT INT TERM
+
+    # Print the logo once (initial state) so we have lines to overwrite
+    echo ""
+    local i
+    for ((i=0; i<llen; i++)); do
+        printf '\033[38;5;220m%s\033[0m\n' "${L[$i]}"
+    done
+
+    # Animate: 36 frames × ~70 ms ≈ 2.5 s
+    local f ci phase color
+    for ((f=0; f<36; f++)); do
+        # Jump back to the first logo line
+        printf "\033[%dA" "$llen"
+
+        for ((i=0; i<llen; i++)); do
+            # Base colour: bottom lines are hotter (higher i = lower in image = hotter)
+            # The band shifts upward each frame (f advances the hot zone toward the top)
+            ci=$(( (i * 2 + plen - f) % plen ))
+
+            # Shimmer: lines in a rolling "blaze phase" get a brief brightness spike
+            phase=$(( (i + f) % shimmer_len ))
+            ci=$(( (ci + SHIMMER[phase]) % plen ))
+
+            color="${P[$ci]}"
+            printf "\033[38;5;%dm%s\033[0m\n" "$color" "${L[$i]}"
+        done
+
+        sleep 0.07
+    done
+
+    # Settle to final static gradient (gold top → red base)
+    printf "\033[%dA" "$llen"
+    local -a FINAL=(2 220 220 214 214 208 202 196)   # index 0 = dim (top accent)
+    for ((i=0; i<llen; i++)); do
+        if [ "${FINAL[$i]}" = "2" ]; then
+            printf '\033[2m%s\033[0m\n' "${L[$i]}"
+        else
+            printf "\033[38;5;%dm%s\033[0m\n" "${FINAL[$i]}" "${L[$i]}"
+        fi
+    done
+
+    # Restore cursor
+    printf '\033[?25h'
+    trap - EXIT INT TERM
+
+    echo ""
+    printf '\033[38;5;220m   ══════════════════════════════════════════════════════════════════════════════════\033[0m\n'
+    printf '   \033[2mWoW Module Manager\033[0m  ✦  \033[2mv%s\033[0m\n' "$MANAGER_VERSION"
+    printf '\033[38;5;220m   ══════════════════════════════════════════════════════════════════════════════════\033[0m\n'
     echo ""
 }
 
@@ -1162,6 +1258,32 @@ ale_script_clone_dir()    { echo "$SERVER_DIR/ale_scripts/$1"; }
 ale_script_is_installed() { [ -d "$SERVER_DIR/ale_scripts/$1/.git" ]; }
 ale_lua_scripts_dir()     { echo "$SERVER_DIR/env/dist/etc/modules/lua_scripts"; }
 
+# Check whether a script's Lua files are present in the lua_scripts deploy dir.
+# Uses the same per-key path knowledge as ale_deploy_lua_files().
+ale_lua_is_deployed() {
+    local key="$1"
+    local lua_dir
+    lua_dir=$(ale_lua_scripts_dir)
+    case "$key" in
+        accountwide)   [ -d "$lua_dir/accountwide" ] && \
+                       ls "$lua_dir/accountwide"/*.lua &>/dev/null ;;
+        levelupreward) ls "$lua_dir"/LevelUpReward*.lua &>/dev/null 2>&1 || \
+                       ls "$lua_dir"/levelup*.lua &>/dev/null 2>&1 || \
+                       ls "$lua_dir"/LevelUp*.lua &>/dev/null 2>&1 ;;
+        exchangenpc)   ls "$lua_dir"/Exchange*.lua &>/dev/null 2>&1 || \
+                       ls "$lua_dir"/exchange*.lua &>/dev/null 2>&1 ;;
+        activechat)    [ -d "$lua_dir/activechat" ] ;;
+        battlepass)    [ -d "$lua_dir/battlepass" ] ;;
+        paragon)       [ -d "$lua_dir/paragon" ] ;;
+        bmah)          [ -f "$lua_dir/bmah_server.lua" ] ;;
+        lootpet)       [ -f "$lua_dir/LootPet.lua" ] ;;
+        sod)           ls "$lua_dir"/sod*.lua &>/dev/null 2>&1 || \
+                       ls "$lua_dir"/SoD*.lua &>/dev/null 2>&1 || \
+                       ls "$lua_dir"/season*.lua &>/dev/null 2>&1 ;;
+        *)             false ;;
+    esac
+}
+
 # Ensure the database container is up. Returns 1 if it cannot start.
 ensure_db_running() {
     refresh_container_names
@@ -1678,13 +1800,21 @@ menu_ale_scripts() {
 
         local i=1
         local -a available_entries=()
-        local entry key name url marker
+        local entry key name url marker cloned deployed
         for entry in "${ALE_SCRIPT_REGISTRY[@]}"; do
             IFS='|' read -r key name url <<< "$entry"
-            if ale_script_is_installed "$key"; then
-                marker="${GREEN}[installed]${RST}"
+            cloned=false; deployed=false
+            ale_script_is_installed "$key" && cloned=true
+            ale_lua_is_deployed "$key"     && deployed=true
+
+            if $deployed && $cloned; then
+                marker="${GREEN}[installed + deployed]${RST}"
+            elif $deployed; then
+                marker="${CYAN}[deployed, no clone]${RST}"
+            elif $cloned; then
+                marker="${YELLOW}[cloned, not deployed]${RST}"
             else
-                marker="${YELLOW}[available]${RST}"
+                marker="${DIM}[not installed]${RST}"
             fi
             printf "  %2d) %-50s %b\n" "$i" "$name" "$marker"
             available_entries+=("$entry")
@@ -2113,7 +2243,7 @@ main_menu() {
 # ─────────────────────────────────────────────────────────────
 # ENTRYPOINT
 # ─────────────────────────────────────────────────────────────
-print_header
+animate_intro
 detect_install
 show_first_run_welcome
 main_menu
