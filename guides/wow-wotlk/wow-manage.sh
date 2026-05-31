@@ -140,7 +140,7 @@ _draw_logo_static() {
     printf '\033[38;5;196m%s\033[K\033[0m\n' "$_LOGO_L7"
     printf '\n'
     printf '\033[38;5;220m ══════════════════════════════════════════════════════════════════════════════════\033[K\033[0m\n'
-    printf '   \033[2m⚔︎ WotLK Mod & Server Manager\033[0m  ✦  \033[2mv%s\033[0m\033[K\n' "$MANAGER_VERSION" ⚔︎
+    printf '   \033[2m⚔︎ WotLK Mod and Server Manager\033[0m  ✦  \033[2mv%s\033[0m\033[K\n' "$MANAGER_VERSION"
     printf '\033[38;5;220m ══════════════════════════════════════════════════════════════════════════════════\033[K\033[0m\n'
     printf '\n'
 }
