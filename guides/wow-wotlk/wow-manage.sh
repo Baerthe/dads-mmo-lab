@@ -2755,7 +2755,7 @@ _sqlmod_install_conf_module() {
     fi
 
     local conf_dist="$module_dir/conf/mod_customlogin.conf.dist"
-    local conf_dest="$SERVER_DIR/env/docker/etc/modules/mod_customlogin.conf"
+    local conf_dest="$SERVER_DIR/env/dist/etc/modules/mod_customlogin.conf"
     if [ -f "$conf_dist" ] && [ ! -f "$conf_dest" ]; then
         mkdir -p "$(dirname "$conf_dest")"
         cp "$conf_dist" "$conf_dest"
@@ -2771,6 +2771,18 @@ _sqlmod_install_tweak() {
     local key="$1" name="$2"
     local cfg_file="$SQLMOD_CONFIG_DIR/${key}.conf"
     local h_mult d_mult a_mult spd_mult
+
+    # Mob tweaks are mutually exclusive — auto-remove any active sibling first
+    local siblings=("buff-mobs" "xbuff-mobs" "nerf-mobs" "baby-mobs")
+    for sibling in "${siblings[@]}"; do
+        if [ "$sibling" != "$key" ] && [ -f "$SQLMOD_MARKER_DIR/$sibling.installed" ]; then
+            print_warning "Removing conflicting tweak '$sibling' before applying '$key'..."
+            _sqlmod_remove_tweak "$sibling" "$sibling" || {
+                print_error "Failed to remove '$sibling'. Aborting to avoid stacking tweaks."
+                return 1
+            }
+        fi
+    done
 
     case "$key" in
         buff-mobs)  h_mult=2;    d_mult=1.5;  a_mult=1.5;  spd_mult=0.8 ;;
@@ -2972,7 +2984,7 @@ _sqlmod_remove_tweak() {
 }
 
 _sqlmod_remove_xprates() {
-    local conf_path="$SERVER_DIR/env/docker/etc/worldserver.conf"
+    local conf_path="$SERVER_DIR/env/dist/etc/worldserver.conf"
     if [ ! -f "$conf_path" ]; then
         print_error "worldserver.conf not found at $conf_path"; return 1
     fi
@@ -3118,7 +3130,7 @@ configure_sqlmod_hearthstone() {
 
 configure_sqlmod_custom_login() {
     sqlmod_init
-    local conf_dest="$SERVER_DIR/env/docker/etc/modules/mod_customlogin.conf"
+    local conf_dest="$SERVER_DIR/env/dist/etc/modules/mod_customlogin.conf"
     if [ ! -f "$conf_dest" ]; then
         local module_dir="$SERVER_DIR/modules/custom-login"
         local conf_dist="$module_dir/conf/mod_customlogin.conf.dist"
@@ -3189,7 +3201,7 @@ configure_sqlmod_xprates() {
     printf '\033[%d;1H\033[J' "$MENU_START_ROW"
     printf "  ${GOLD}── Configure: XP Rates ──${RST}\n\n"
 
-    local conf_path="$SERVER_DIR/env/docker/etc/worldserver.conf"
+    local conf_path="$SERVER_DIR/env/dist/etc/worldserver.conf"
     if [ ! -f "$conf_path" ]; then
         print_error "worldserver.conf not found at $conf_path"
         print_info "Make sure your AzerothCore install is complete."
