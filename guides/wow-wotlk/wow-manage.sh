@@ -2456,6 +2456,187 @@ ale_script_remove() {
     print_info "(Database tables created by this script are kept — removing them risks data loss.)"
 }
 
+# ─────────────────────────────────────────────────────────────
+# ABOUT PANELS
+# ─────────────────────────────────────────────────────────────
+
+_get_about_text() {
+    local key="$1"
+    case "$key" in
+        mod-ah-bot)
+            printf '%s\n' \
+                'An Auction House bot that populates faction AH listings' \
+                'by automatically placing and bidding on auctions. Assign' \
+                'a dedicated bot character via account and character IDs,' \
+                'then enable seller, buyer, or both modes. Item quotas per' \
+                'quality tier are adjustable in config or the database table.'
+            ;;
+        mod-solocraft)
+            printf '%s\n' \
+                'Scales player stats inside dungeons and raids based on group' \
+                'size, making solo play viable at appropriate difficulty.' \
+                'Provides configurable per-instance difficulty settings, a' \
+                'spellpower buff, and an optional debuff for overpowered' \
+                'groups. Level thresholds prevent over-buffing characters.'
+            ;;
+        mod-aoe-loot)
+            printf '%s\n' \
+                'Enables Area-of-Effect looting -- interacting with one corpse' \
+                'automatically collects loot from all nearby corpses in a' \
+                'single window. Players toggle per-character via .aoeloot' \
+                'on/off. Configurable range, group support, and a 15-item cap' \
+                'per window keep server load stable.'
+            ;;
+        mod-learn-spells)
+            printf '%s\n' \
+                'Automatically teaches all available class spells on level-up,' \
+                'mimicking the Cataclysm auto-learn system. New abilities' \
+                'appear in the spellbook the moment a level is reached --' \
+                'no more visiting class trainers to unlock new skills.'
+            ;;
+        mod-individual-progression)
+            printf '%s\n' \
+                'Simulates a per-player Vanilla to TBC to WotLK content' \
+                'journey. NPCs, world objects, and quests phase in based on' \
+                'individual progression stage. Catch-up mechanics are removed' \
+                'to make each character journey meaningful. Works great' \
+                'alongside Playerbots or NPCBots.'
+            ;;
+        mod-autobalance)
+            printf '%s\n' \
+                'Dynamically scales dungeon and raid mob health, mana, and' \
+                'damage based on player count. Use .ab mapstat and' \
+                '.ab creaturestat in-game to inspect current multipliers.' \
+                'A GM .ab setoffset command tweaks server-wide difficulty.' \
+                'Config hot-reloads via .reload config.'
+            ;;
+        mod-transmog)
+            printf '%s\n' \
+                'Adds a Transmogrification NPC (entry 190010) letting players' \
+                'change the visual appearance of their gear. Based on the' \
+                'Rochet2 transmog script. Spawn the NPC anywhere with' \
+                '.npc add 190010. An optional TransmogPlus variant is' \
+                'available via mod-acore-subscriptions.'
+            ;;
+        mod-1v1-arena)
+            printf '%s\n' \
+                'Introduces solo 1v1 arena brackets so players can queue for' \
+                'ranked matches without needing a partner. Adds its own arena' \
+                'season structure and rating/reward system alongside the' \
+                'standard 2v2, 3v3, and 5v5 brackets.'
+            ;;
+        mod-ale)
+            printf '%s\n' \
+                'AzerothCore Lua Engine -- a powerful AzerothCore-specific' \
+                'Lua scripting runtime. Enables custom gameplay features,' \
+                'events, and mechanics without modifying core C++ code.' \
+                'Diverged from original Eluna; ALE scripts are NOT' \
+                'interchangeable with standard Eluna scripts. Supports' \
+                'LuaJIT (recommended), Lua 5.2, 5.3, and 5.4.'
+            ;;
+        accountwide)
+            printf '%s\n' \
+                'Syncs achievements, currencies, gold, mounts, and pets across' \
+                'all characters on an account. Each system is independently' \
+                'toggle-able in config. A mandatory helper script' \
+                '(00_AccountWideUtils.lua) must always be present alongside' \
+                'other scripts from this repo. Best installed on a fresh server.'
+            ;;
+        levelupreward)
+            printf '%s\n' \
+                'Sends in-game mail with gold or items when players hit' \
+                'configured levels. A lore-friendly mode includes the player' \
+                'rank in the mail text. Default rewards scale from 1g at' \
+                'level 10 up to generous amounts at higher levels. Fully' \
+                'customizable per level in the Lua config.'
+            ;;
+        exchangenpc)
+            printf '%s\n' \
+                'Spawns a configurable NPC that swaps items for other items --' \
+                'a custom material-exchange vendor. Define exchange pairs in' \
+                'the Lua config, run the world SQL to place the NPC, and' \
+                'players interact with it directly to trade materials.'
+            ;;
+        activechat)
+            printf '%s\n' \
+                'Simulates lively world and guild chat with scripted dialogues' \
+                'between fake players, making low-population servers feel' \
+                'inhabited. Chat text tables are fully customizable -- add new' \
+                'lines to npc_text.lua and npc_text_guild.lua to expand the' \
+                'conversation pool.'
+            ;;
+        battlepass)
+            printf '%s\n' \
+                'A complete Battle Pass progression system with XP earned from' \
+                'kills, quests, PvP, and dungeons. Rewards include items, gold,' \
+                'titles, and spells. Comes with an in-game client addon for' \
+                'progress tracking and an NPC vendor fallback. Players use .bp' \
+                'commands; GMs use .bpadmin. Requires the CSMH library.'
+            ;;
+        paragon)
+            printf '%s\n' \
+                'Endless post-max-level stat progression for AzerothCore.' \
+                'After reaching level 80, players earn Paragon XP that' \
+                'converts into stat bonuses, keeping end-game progression' \
+                'meaningful. Serverside is feature-complete; the clientside' \
+                'addon UI is in beta. Full architecture documentation included.'
+            ;;
+        bmah)
+            printf '%s\n' \
+                'A faithful backport of the Mists of Pandaria Black Market' \
+                'Auction House to AzerothCore 3.3.5 via Eluna Lua. Recreates' \
+                'the authentic MoP BMAH UI and server-side auction logic.' \
+                'Configure which NPC hosts the BMAH, the item pool, and bid' \
+                'timers. Includes a matching client addon for the full MoP look.'
+            ;;
+        lootpet)
+            printf '%s\n' \
+                'Turns your vanity pet into a functional auto-looter. The pet' \
+                'physically walks to nearby corpses to collect loot, adding' \
+                'immersion. Party-aware with configurable loot distance and' \
+                'group toggle. Default pet: Warbot (entry 34587, item 46767).' \
+                'Summon your Warbot and start hunting.'
+            ;;
+        sod)
+            printf '%s\n' \
+                'Awards a tiered XP bonus buff mimicking the Season of' \
+                'Discovery Discoverer Delight experience. Applies bonuses' \
+                'from +50% to +300% based on player level range, using custom' \
+                'spell IDs 80865 through 80870. Requires the matching spell' \
+                'data to be present on the server.'
+            ;;
+        sitmeanrest)
+            printf '%s\n' \
+                'Grants a regeneration buff (Graccu Fruitcake, spell 25990)' \
+                'when players use the /sit emote. The buff is instantly removed' \
+                'on any movement or entering combat, preventing exploit healing.' \
+                'Duration and regen spell ID are configurable in the CONFIG' \
+                'table at the top of SitMeansRest.lua.'
+            ;;
+        unlimitedammo)
+            printf '%s\n' \
+                'Automatically refills Hunter ammo (arrows or bullets) when' \
+                'the stack drops below a configurable threshold (default: 52).' \
+                'Keeps exactly one ammo type in bags -- no more running dry' \
+                'mid-fight. Enable via the ENABLED flag in config, or use' \
+                'the .ua GM command for runtime-only toggling.'
+            ;;
+        *)
+            printf '%s\n' 'No description available. See the GitHub link below.'
+            ;;
+    esac
+}
+
+show_about() {
+    local key="$1" name="$2" url="$3"
+    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    printf "  ${GOLD}── About: %s ──${RST}\n\n" "$name"
+    _get_about_text "$key" | sed 's/^/  /'
+    printf "\n  ${DIM}Source: %s${RST}\n" "$url"
+    printf "\n  ${DIM}Press ENTER to return...${RST}\n"
+    read -r _
+}
+
 # ── ALE Scripts submenu ───────────────────────────────────────
 menu_ale_scripts() {
     local page_start=0
@@ -2530,7 +2711,7 @@ menu_ale_scripts() {
             [ "$current_page" -lt "$total_pages" ]  && nav+="   ${WHITE}> next${RST}"
             printf "%b\n" "$nav"
         fi
-        printf "  ${WHITE}i<nums>${RST} Install   ${WHITE}r<num>${RST} Remove   ${WHITE}c<num>${RST} Config   ${WHITE}ENTER${RST} Back\n"
+        printf "  ${WHITE}i<nums>${RST} Install   ${WHITE}r<num>${RST} Remove   ${WHITE}c<num>${RST} Config   ${WHITE}?<num>${RST} About   ${WHITE}ENTER${RST} Back\n"
 
         _read_menu_input "$(( tlines - 1 ))"
         local raw_choice="$_MENU_INPUT"
@@ -2608,8 +2789,18 @@ menu_ale_scripts() {
                 esac
                 press_enter
                 ;;
+            [?])
+                local anum; anum="${nums//[[:space:]]/}"
+                if ! [[ "$anum" =~ ^[0-9]+$ ]] || \
+                   [ "$anum" -lt 1 ] || [ "$anum" -gt "$total" ]; then
+                    print_warning "Invalid script number -- e.g. ?5"
+                    press_enter; continue
+                fi
+                IFS='|' read -r key name url <<< "${available_entries[$((anum - 1))]}"
+                show_about "$key" "$name" "$url"
+                ;;
             *)
-                print_warning "Unknown command. Use i<nums>, r<num>, c<num>, or ENTER."
+                print_warning "Unknown command. Use i<nums>, r<num>, c<num>, ?<num>, or ENTER."
                 press_enter
                 ;;
         esac
@@ -2722,7 +2913,7 @@ menu_modules() {
             [ "$current_page" -lt "$total_pages" ]  && nav+="   ${WHITE}> next${RST}"
             printf "%b\n" "$nav"
         fi
-        printf "  ${WHITE}i <nums>${RST} Install   ${WHITE}r <num>${RST} Remove   ${WHITE}ENTER${RST} Back\n"
+        printf "  ${WHITE}i <nums>${RST} Install   ${WHITE}r <num>${RST} Remove   ${WHITE}?<num>${RST} About   ${WHITE}ENTER${RST} Back\n"
 
         _read_menu_input "$(( tlines - 1 ))"
         local raw_choice="$_MENU_INPUT"
@@ -2828,8 +3019,18 @@ menu_modules() {
                 fi
                 press_enter
                 ;;
+            [?])
+                local anum; anum="${nums//[[:space:]]/}"
+                if ! [[ "$anum" =~ ^[0-9]+$ ]] || \
+                   [ "$anum" -lt 1 ] || [ "$anum" -gt "$total" ]; then
+                    print_warning "Invalid module number -- e.g. ?3"
+                    press_enter; continue
+                fi
+                IFS='|' read -r key name url _sql_dirs <<< "${available_entries[$((anum - 1))]}"
+                show_about "$key" "$name" "$url"
+                ;;
             *)
-                print_warning "Unknown command. Use i <nums>, r <num>, or ENTER."
+                print_warning "Unknown command. Use i <nums>, r <num>, ?<num>, or ENTER."
                 press_enter
                 ;;
         esac
@@ -2945,7 +3146,7 @@ main_menu() {
             "$(basename "$SERVER_DIR")" "$state_str" "$build_str"
         printf "\n  ${GOLD}${BOLD}Server Modifications${RST}\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
-        printf "  ${WHITE}1)${RST} Manage Modules\n"
+        printf "  ${WHITE}1)${RST} Manage AzerothCore Modules\n"
         printf "  ${WHITE}2)${RST} Manage ALE Lua Mods\n"
         printf "  ${WHITE}3)${RST} Configure AH Bot\n"
         printf "  ${WHITE}4)${RST} Configure ALE\n"
