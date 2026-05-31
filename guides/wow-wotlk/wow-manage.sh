@@ -274,7 +274,7 @@ _offer_npc_in_capitals() {
     echo -e "  ${WHITE}In-game GM:${RST}  ${CYAN}.npc add $npc_entry 1 $og_x $og_y 17.5 4.5${RST}"
     echo -e "  ${WHITE}WS console:${RST}  ${CYAN}npc add $npc_entry 1 $og_x $og_y 17.5 4.5${RST}"
     echo ""
-    print_info "Access the worldserver console via option 12 from the main menu."
+    print_info "Access the worldserver console via option 13 from the main menu."
     print_info "If the NPC lands in a bad spot, use .npc delete (in-game) or"
     print_info "npc delete (console) then re-place with your own coordinates."
     echo ""
@@ -1310,8 +1310,8 @@ configure_ahbot() {
         return 1
     fi
 
-    mkdir -p "$SERVER_DIR/conf/modules"
-    local conf_active="$SERVER_DIR/conf/modules/mod_ahbot.conf"
+    mkdir -p "$SERVER_DIR/env/dist/etc/modules"
+    local conf_active="$SERVER_DIR/env/dist/etc/modules/mod_ahbot.conf"
     cp "$conf_dist" "$conf_active"
 
     sed -i \
@@ -4291,6 +4291,379 @@ menu_modules() {
     done
 }
 
+# ── Module Management (conf files) ────────────────────────────
+_module_conf_name() {
+    case "$1" in
+        mod-1v1-arena)                  echo "1v1arena.conf" ;;
+        mod-aoe-loot)                   echo "mod_aoe_loot.conf" ;;
+        mod-ah-bot)                     echo "mod_ahbot.conf" ;;
+        mod-autobalance)                echo "AutoBalance.conf" ;;
+        mod-ale)                        echo "mod_ale.conf" ;;
+        mod-player-bot-level-brackets)  echo "mod_player_bot_level_brackets.conf" ;;
+        mod-challenge-modes)            echo "challenge_modes.conf" ;;
+        mod-individual-progression)     echo "individualProgression.conf" ;;
+        mod-junk-to-gold)               echo "" ;;
+        mod-learn-spells)               echo "mod_learnspells.conf" ;;
+        mod-npc-beastmaster)            echo "mod_npc_beastmaster.conf" ;;
+        mod-solocraft)                  echo "Solocraft.conf" ;;
+        mod-transmog)                   echo "transmog.conf" ;;
+        *)                              echo "" ;;
+    esac
+}
+
+_module_conf_active_path() {
+    local conf_name; conf_name=$(_module_conf_name "$1")
+    [ -z "$conf_name" ] && return 1
+    echo "$SERVER_DIR/env/dist/etc/modules/$conf_name"
+}
+
+_module_conf_dist_path() {
+    local key="$1"
+    local conf_name; conf_name=$(_module_conf_name "$key")
+    [ -z "$conf_name" ] && return 1
+
+    local expected="$SERVER_DIR/modules/$key/conf/${conf_name}.dist"
+    [ -f "$expected" ] && { echo "$expected"; return 0; }
+
+    local found
+    found=$(find "$SERVER_DIR/modules/$key" -maxdepth 4 -type f -name "${conf_name}.dist" 2>/dev/null | head -1)
+    [ -n "$found" ] && { echo "$found"; return 0; }
+    return 1
+}
+
+_module_conf_sync_legacy_if_needed() {
+    local key="$1"
+    [ "$key" != "mod-ah-bot" ] && return 0
+    local active legacy
+    active=$(_module_conf_active_path "$key") || return 0
+    legacy="$SERVER_DIR/conf/modules/mod_ahbot.conf"
+    if [ ! -f "$active" ] && [ -f "$legacy" ]; then
+        mkdir -p "$(dirname "$active")"
+        cp "$legacy" "$active"
+    fi
+}
+
+_module_conf_status() {
+    local key="$1"
+    local conf_name; conf_name=$(_module_conf_name "$key")
+    if [ -z "$conf_name" ]; then
+        echo "${DIM}No conf${RST}"
+        return 0
+    fi
+
+    _module_conf_sync_legacy_if_needed "$key"
+    local active
+    active=$(_module_conf_active_path "$key") || true
+
+    if ! module_is_installed "$key"; then
+        if [ -n "$active" ] && [ -f "$active" ]; then
+            echo "${YELLOW}⚠ Conf exists, module missing${RST}"
+        else
+            echo "${DIM}○ Not installed${RST}"
+        fi
+        return 0
+    fi
+
+    if [ -n "$active" ] && [ -f "$active" ]; then
+        echo "${GREEN}✓ Active${RST}"
+        return 0
+    fi
+
+    if _module_conf_dist_path "$key" >/dev/null 2>&1; then
+        echo "${CYAN}◑ Ready to activate${RST}"
+    else
+        echo "${YELLOW}⚠ Rebuild needed${RST}"
+    fi
+}
+
+_module_conf_hints() {
+    case "$1" in
+        mod-1v1-arena)
+            printf '%s\n' \
+                'Common options:' \
+                '  - Arena1v1.Enable' \
+                '  - Arena1v1.MinLevel' \
+                '  - Arena1v1.Costs' \
+                '  - Arena1v1.Announcer' \
+                '  - Arena1v1.PreventHealingTalents'
+            ;;
+        mod-aoe-loot)
+            printf '%s\n' \
+                'Common options:' \
+                '  - AOELoot.Enable' \
+                '  - AOELoot.Message' \
+                '  - AOELoot.Range' \
+                '  - AOELoot.Group'
+            ;;
+        mod-ah-bot)
+            printf '%s\n' \
+                'Common options:' \
+                '  - AuctionHouseBot.EnableSeller' \
+                '  - AuctionHouseBot.EnableBuyer' \
+                '  - AuctionHouseBot.Account / GUID / GUIDs' \
+                '  - AuctionHouseBot.Trace* debugging flags' \
+                'Tip: use top-level option 5 for guided AH Bot setup.'
+            ;;
+        mod-autobalance)
+            printf '%s\n' \
+                'Common options:' \
+                '  - AutoBalance.Enable.* toggles' \
+                '  - Scaling controls by map size/content' \
+                '  - Dungeon/raid coverage toggles'
+            ;;
+        mod-ale)
+            printf '%s\n' \
+                'Common options:' \
+                '  - ALE.ScriptPath' \
+                '  - ALE.EnableLuaEngine' \
+                'Tip: use top-level option 6 for guided ALE setup.'
+            ;;
+        mod-player-bot-level-brackets)
+            printf '%s\n' \
+                'Common options:' \
+                '  - BotLevelBrackets.Enabled' \
+                '  - CheckFrequency / CheckFlaggedFrequency' \
+                '  - IgnoreGuildBotsWithRealPlayers' \
+                '  - IgnoreArenaTeamBots' \
+                'Requires Playerbots module.'
+            ;;
+        mod-challenge-modes)
+            printf '%s\n' \
+                'Common options:' \
+                '  - ChallengeModes.Enable' \
+                '  - Hardcore.Enable' \
+                '  - Hardcore.XPMultiplier' \
+                '  - Hardcore.TalentRewards / ItemRewards' \
+                'Also requires EnablePlayerSettings = 1 in worldserver.conf.'
+            ;;
+        mod-individual-progression)
+            printf '%s\n' \
+                'Common options:' \
+                '  - IndividualProgression.Enable' \
+                '  - EnforceGroupRules' \
+                '  - VanillaPowerAdjustment / VanillaHealingAdjustment' \
+                '  - QuestXPFix'
+            ;;
+        mod-junk-to-gold)
+            printf '%s\n' \
+                'This module has no standard .conf.dist file.' \
+                'Behavior is module-driven with no exposed runtime conf here.'
+            ;;
+        mod-learn-spells)
+            printf '%s\n' \
+                'Common options:' \
+                '  - LearnSpells.Enable' \
+                '  - LearnSpells.Announce' \
+                '  - LearnSpells.OnFirstLogin' \
+                '  - LearnSpells.MaxLevel'
+            ;;
+        mod-npc-beastmaster)
+            printf '%s\n' \
+                'Common options:' \
+                '  - BeastMaster.Enable' \
+                '  - BeastMaster.HunterOnly' \
+                '  - BeastMaster.AllowedClasses' \
+                '  - BeastMaster.MinLevel' \
+                'Tip: add 601026 to Creatures.CustomIDs in worldserver.conf.'
+            ;;
+        mod-solocraft)
+            printf '%s\n' \
+                'Common options:' \
+                '  - Solocraft.Enable / Solocraft.Announce' \
+                '  - SoloCraft.Debuff.Enable' \
+                '  - SoloCraft.Spellpower.Mult / SoloCraft.Stats.Mult'
+            ;;
+        mod-transmog)
+            printf '%s\n' \
+                'Common options:' \
+                '  - Transmogrification.Enable' \
+                '  - ShowSetDisclaimer' \
+                '  - UseCollectionSystem / UseVendorInterface' \
+                '  - AllowHiddenTransmog'
+            ;;
+    esac
+}
+
+menu_module_management() {
+    local page_start=0
+    while true; do
+        local tlines; tlines=$(tput lines 2>/dev/null || echo 24)
+        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+
+        local -a available_entries=()
+        local entry
+        for entry in "${MODULE_REGISTRY[@]}"; do available_entries+=("$entry"); done
+
+        local total=${#available_entries[@]}
+        local avail=$(( tlines - MENU_START_ROW - 1 ))
+        local page_size=$(( avail - 10 ))
+        [ "$page_size" -lt 3 ] && page_size=3
+        local max_start=$(( total - page_size ))
+        [ "$max_start" -lt 0 ] && max_start=0
+        [ "$page_start" -gt "$max_start" ] && page_start=$max_start
+        [ "$page_start" -lt 0 ] && page_start=0
+        local page_end=$(( page_start + page_size ))
+        [ "$page_end" -gt "$total" ] && page_end=$total
+        local total_pages=$(( (total + page_size - 1) / page_size ))
+        local current_page=$(( page_start / page_size + 1 ))
+
+        printf "  ${GOLD}── Module Management ─────────────────────────────${RST}\n"
+        printf "  ${DIM}Conf files are activated by copying: .conf.dist -> .conf${RST}\n"
+        printf "  ${DIM}Path: $SERVER_DIR/env/dist/etc/modules/${RST}\n"
+        printf "  ${YELLOW}⚠  After installing modules, run top-level option 7 (Rebuild worldserver) first.${RST}\n"
+        printf "  ${DIM}%-4s %-34s %s${RST}\n" "Num" "Module" "Conf Status"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+
+        local idx key name url sql_dirs
+        for (( idx=page_start; idx<page_end; idx++ )); do
+            IFS='|' read -r key name url sql_dirs <<< "${available_entries[$idx]}"
+            printf "  ${WHITE}%2d)${RST} %-34s %b\n" "$(( idx + 1 ))" "$name" "$(_module_conf_status "$key")"
+        done
+
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        if [ "$total_pages" -gt 1 ]; then
+            local nav="  ${DIM}Page $current_page/$total_pages${RST}"
+            [ "$current_page" -gt 1 ] && nav+="   ${WHITE}< prev${RST}"
+            [ "$current_page" -lt "$total_pages" ] && nav+="   ${WHITE}> next${RST}"
+            printf "%b\n" "$nav"
+        fi
+        printf "  ${WHITE}a<num>${RST} Activate conf   ${WHITE}e<num>${RST} Edit conf   ${WHITE}r<num>${RST} Reset defaults   ${WHITE}?<num>${RST} Help   ${WHITE}ENTER${RST} Back\n"
+
+        _read_menu_input "$(( tlines - 1 ))"
+        local raw_choice="$_MENU_INPUT"
+        [ -z "$raw_choice" ] && return
+
+        local action nums inum
+        action="${raw_choice:0:1}"
+        nums="${raw_choice:1}"
+
+        case "${action,,}" in
+            '<')
+                page_start=$(( page_start - page_size ))
+                [ "$page_start" -lt 0 ] && page_start=0
+                ;;
+            '>')
+                page_start=$(( page_start + page_size ))
+                [ "$page_start" -gt "$max_start" ] && page_start=$max_start
+                ;;
+            a|e|r|?)
+                inum="${nums//[[:space:]]/}"
+                if ! [[ "$inum" =~ ^[0-9]+$ ]] || [ "$inum" -lt 1 ] || [ "$inum" -gt "$total" ]; then
+                    print_warning "Invalid module number."
+                    press_enter
+                    continue
+                fi
+                IFS='|' read -r key name url sql_dirs <<< "${available_entries[$((inum - 1))]}"
+
+                if [ "${action,,}" = "?" ]; then
+                    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                    printf "  ${GOLD}── Module Config Help: %s ──${RST}\n\n" "$name"
+                    local conf_name conf_dist conf_active
+                    conf_name=$(_module_conf_name "$key")
+                    if [ -z "$conf_name" ]; then
+                        printf "  ${DIM}No standard .conf.dist for this module.${RST}\n"
+                    else
+                        conf_dist=$(_module_conf_dist_path "$key" 2>/dev/null || true)
+                        conf_active=$(_module_conf_active_path "$key" 2>/dev/null || true)
+                        printf "  ${CYAN}Expected active file:${RST} %s\n" "$conf_active"
+                        if [ -n "$conf_dist" ]; then
+                            printf "  ${CYAN}Template (.dist):${RST} %s\n" "$conf_dist"
+                        else
+                            printf "  ${YELLOW}Template (.dist):${RST} not found yet (install + rebuild worldserver first)\n"
+                        fi
+                    fi
+                    echo ""
+                    _module_conf_hints "$key" | sed 's/^/  /'
+                    echo ""
+                    printf "  ${DIM}After conf changes: restart worldserver to apply.${RST}\n"
+                    printf "  ${DIM}Press ENTER to return...${RST}\n"
+                    read -r _
+                    continue
+                fi
+
+                local conf_name conf_dist conf_active
+                conf_name=$(_module_conf_name "$key")
+                if [ -z "$conf_name" ]; then
+                    print_warning "$name has no standard .conf.dist configuration file."
+                    press_enter
+                    continue
+                fi
+                if ! module_is_installed "$key"; then
+                    print_warning "$name is not installed."
+                    print_info "Install it first from top-level option 1, then rebuild via option 7."
+                    press_enter
+                    continue
+                fi
+
+                _module_conf_sync_legacy_if_needed "$key"
+                conf_dist=$(_module_conf_dist_path "$key" 2>/dev/null || true)
+                conf_active=$(_module_conf_active_path "$key" 2>/dev/null || true)
+                mkdir -p "$SERVER_DIR/env/dist/etc/modules"
+
+                if [ "${action,,}" = "a" ]; then
+                    if [ -z "$conf_dist" ] || [ ! -f "$conf_dist" ]; then
+                        print_warning "Template .dist not found for $name."
+                        print_info "Run top-level option 7 (Rebuild worldserver), then try again."
+                        press_enter
+                        continue
+                    fi
+                    if [ -f "$conf_active" ] && ! ask_yes_no "Active conf already exists. Overwrite it?"; then
+                        print_info "Kept existing conf."
+                        press_enter
+                        continue
+                    fi
+                    cp "$conf_dist" "$conf_active"
+                    print_success "Activated conf: $conf_active"
+                    print_info "Restart worldserver (top-level option 11) to apply."
+                    press_enter
+                    continue
+                fi
+
+                if [ "${action,,}" = "e" ]; then
+                    if [ ! -f "$conf_active" ]; then
+                        if [ -n "$conf_dist" ] && [ -f "$conf_dist" ] && ask_yes_no "No active conf yet. Create it from .dist now?"; then
+                            cp "$conf_dist" "$conf_active"
+                            print_success "Created $conf_active"
+                        else
+                            print_warning "No active conf file to edit."
+                            print_info "Use a<num> to activate first."
+                            press_enter
+                            continue
+                        fi
+                    fi
+                    ${EDITOR:-nano} "$conf_active"
+                    print_info "Restart worldserver (top-level option 11) to apply."
+                    press_enter
+                    continue
+                fi
+
+                if [ "${action,,}" = "r" ]; then
+                    if [ -z "$conf_dist" ] || [ ! -f "$conf_dist" ]; then
+                        print_warning "Template .dist not found for $name."
+                        print_info "Run top-level option 7 (Rebuild worldserver), then try again."
+                        press_enter
+                        continue
+                    fi
+                    if ! ask_yes_no "Reset $name conf to defaults? This overwrites current changes."; then
+                        print_info "Canceled."
+                        press_enter
+                        continue
+                    fi
+                    cp "$conf_dist" "$conf_active"
+                    print_success "Reset to defaults: $conf_active"
+                    print_info "Restart worldserver (top-level option 11) to apply."
+                    press_enter
+                    continue
+                fi
+                ;;
+            *)
+                print_warning "Unknown command. Use a<num>, e<num>, r<num>, ?<num>, or ENTER."
+                press_enter
+                ;;
+        esac
+    done
+}
+
 # ─────────────────────────────────────────────────────────────
 # FIRST-RUN WELCOME
 # ─────────────────────────────────────────────────────────────
@@ -4436,7 +4809,7 @@ menu_sql_mods() {
         local current_page=$(( page_start / page_size + 1 ))
 
         printf "  ${GOLD}── SQL Mods ──────────────────────────────────────${RST}\n"
-        printf "  ${YELLOW}⚠  Edits the world DB — auto-backup runs before each install${RST}\n"
+        printf "  ${YELLOW}⚠  Edits the world DB — auto-backup runs before each install (see \"sql_scripts\" directory)${RST}\n"
         printf "  ${DIM}%-4s %-40s %s${RST}\n" "Num" "Mod" "Status"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
 
