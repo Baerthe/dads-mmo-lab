@@ -588,7 +588,7 @@ server_start() {
             print_info "Most common causes and fixes:"
             print_info ""
             print_info "  • ${CYAN}'Table X already exists' errors${RST}: a previous module install"
-            print_info "    corrupted update tracking. Use option 13 → Server Maintenance → Repair install state."
+            print_info "    corrupted update tracking. Use option 14 → Server Maintenance → Repair install state."
             print_info ""
             print_info "  • ${CYAN}'Permission denied' errors${RST}: UID/GID mismatch on env/dist."
             print_info "    Run: sudo chown -R 1000:1000 env/dist/etc env/dist/logs"
@@ -1079,7 +1079,7 @@ repair_install_state() {
     esac
 
     echo ""
-    print_info "Done. Start the server (menu option 7) for AC to re-apply cleared SQL."
+    print_info "Done. Start the server (menu option 9) for AC to re-apply cleared SQL."
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -1243,11 +1243,10 @@ configure_ahbot() {
 
     if ! module_is_installed "mod-ah-bot"; then
         print_error "mod-ah-bot is not installed yet!"
-        print_info "Add it first via the main menu (Add modules)."
+        print_info "Add it first via main menu option 1 (Manage AzerothCore Modules)."
         return 1
     fi
 
-    echo ""
     echo -e "${WHITE}The Auction House Bot needs a player account and character${RST}"
     echo -e "${WHITE}to act as. The bot uses this character to list items.${RST}"
     echo ""
@@ -1355,7 +1354,7 @@ configure_ale() {
 
     if ! module_is_installed "mod-ale"; then
         print_error "mod-ale is not installed yet!"
-        print_info "Add it first via the main menu (Add modules)."
+        print_info "Add it first via main menu option 1 (Manage AzerothCore Modules)."
         return 1
     fi
 
@@ -2563,7 +2562,7 @@ ale_script_install() {
             if ask_yes_no "Configure Battle Pass SQL and settings now?"; then
                 configure_ale_battlepass
             else
-                print_info "Run option 4 → c5 to reconfigure Battle Pass later."
+                print_info "Run main menu option 5 (Configure ALE) to reconfigure Battle Pass later."
                 print_info "Remember to apply SQL manually from:"
                 print_info "  $clone_dir/sql/"
             fi
@@ -3842,7 +3841,7 @@ menu_ale_scripts() {
 
         if ! module_is_installed "mod-ale"; then
             printf "  ${RED}✗ mod-ale (ALE Lua Engine) is not installed.${RST}\n"
-            printf "  ${WHITE}Install via main menu option 1, then configure via option 3.${RST}\n"
+            printf "  ${WHITE}Install via main menu option 1, then configure via option 5.${RST}\n"
             printf "\n  ${DIM}Press ENTER to return...${RST}\n"
             read -r _
             return
@@ -4402,7 +4401,7 @@ _module_conf_hints() {
                 '  - AuctionHouseBot.EnableBuyer' \
                 '  - AuctionHouseBot.Account / GUID / GUIDs' \
                 '  - AuctionHouseBot.Trace* debugging flags' \
-                'Tip: use top-level option 5 for guided AH Bot setup.'
+                'Tip: use top-level option 4 for guided AH Bot setup.'
             ;;
         mod-autobalance)
             printf '%s\n' \
@@ -4416,7 +4415,7 @@ _module_conf_hints() {
                 'Common options:' \
                 '  - ALE.ScriptPath' \
                 '  - ALE.EnableLuaEngine' \
-                'Tip: use top-level option 6 for guided ALE setup.'
+                'Tip: use top-level option 5 for guided ALE setup.'
             ;;
         mod-player-bot-level-brackets)
             printf '%s\n' \
@@ -4590,7 +4589,7 @@ menu_module_management() {
                 fi
                 if ! module_is_installed "$key"; then
                     print_warning "$name is not installed."
-                    print_info "Install it first from top-level option Install modules, then rebuild via Rebuild worldserver."
+                    print_info "Install it first via main menu option 1 (Manage AzerothCore Modules), then rebuild via option 7 (Rebuild worldserver)."
                     press_enter
                     continue
                 fi
@@ -4734,18 +4733,18 @@ show_first_run_welcome() {
     echo -e "${WHITE}${BOLD}A few things to know:${RST}"
     echo ""
     echo -e "${GREEN}  ✓${RST} ${WHITE}Nothing changes until you explicitly choose an action.${RST}"
-    echo -e "${WHITE}    Options 7 (Server status) and 11 (View logs) are read-only.${RST}"
+    echo -e "${WHITE}    Options 8 (Server status) and 12 (View logs) are read-only.${RST}"
     echo ""
     echo -e "${GREEN}  ✓${RST} ${WHITE}You'll be asked before anything destructive.${RST}"
     echo -e "${WHITE}    Installs, removes, rebuilds, and database operations all ask first.${RST}"
     echo ""
-    echo -e "${GREEN}  ✓${RST} ${WHITE}Option 13 → Server Maintenance has backup, restore, and repair tools.${RST}"
+    echo -e "${GREEN}  ✓${RST} ${WHITE}Option 14 → Server Maintenance has backup, restore, and repair tools.${RST}"
     echo -e "${WHITE}    Repair only clears SQL update-tracking rows — it never drops tables.${RST}"
     echo ""
 
     if [ "$user_module_count" -eq 0 ]; then
         echo -e "${WHITE}${BOLD}Suggested first steps for a fresh install:${RST}"
-        echo -e "${WHITE}  1. Option ${CYAN}7${WHITE} (Server status) — confirm your containers are running${RST}"
+        echo -e "${WHITE}  1. Option ${CYAN}8${WHITE} (Server status) — confirm your containers are running${RST}"
         echo -e "${WHITE}  2. Option ${CYAN}3${WHITE} (SQL Mods) — safe first tweaks, no rebuild needed${RST}"
         echo -e "${WHITE}  3. Option ${CYAN}1${WHITE} (Modules) — browse and install C++ modules${RST}"
         echo -e "${WHITE}  4. Option ${CYAN}5${WHITE} (Configure ALE) — if you installed the ALE module,${RST}"
@@ -4755,8 +4754,8 @@ show_first_run_welcome() {
         echo -e "${WHITE}  • Option ${CYAN}1${WHITE} (Modules) — browse installed and available C++ modules${RST}"
         echo -e "${WHITE}  • Option ${CYAN}2${WHITE} (ALE Lua Mods) — manage Lua scripts (needs ALE installed)${RST}"
         echo -e "${WHITE}  • Option ${CYAN}3${WHITE} (SQL Mods) — database tweaks, no rebuild required${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}7${WHITE} (Server status) — check container state${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}13${WHITE} (Server Maintenance) — backup, restore, repair${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}8${WHITE} (Server status) — check container state${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}14${WHITE} (Server Maintenance) — backup, restore, repair${RST}"
     fi
     echo ""
     echo -e "${DIM}This welcome shows once per install. The marker file at${RST}"
