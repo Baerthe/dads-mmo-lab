@@ -236,7 +236,7 @@ press_enter() {
 #   Shows GM commands (in-game and console forms) to spawn an NPC
 #   in Stormwind and Orgrimmar.  Uses per-entry deterministic offsets
 #   so repeated calls never stack NPCs on the same coordinates.
-#   Optionally appends commands to $SERVER_DIR/npc_spawn_commands.txt.
+#   NPC spawn commands are recorded to ingame-commands.txt on mod install.
 #   timing_note: extra line shown before coordinates (e.g. "run after rebuild")
 # ─────────────────────────────────────────────────────────────
 _offer_npc_in_capitals() {
@@ -251,6 +251,8 @@ _offer_npc_in_capitals() {
         999991)  slot=1 ;;
         601026)  slot=2 ;;
         1116001) slot=3 ;;
+        90100)   slot=4 ;;
+        2069430) slot=5 ;;
         *)       slot="${_NPC_SPAWN_IDX:-0}" ;;
     esac
     _NPC_SPAWN_IDX=$((_NPC_SPAWN_IDX + 1))
@@ -278,19 +280,458 @@ _offer_npc_in_capitals() {
     print_info "If the NPC lands in a bad spot, use .npc delete (in-game) or"
     print_info "npc delete (console) then re-place with your own coordinates."
     echo ""
+}
 
-    if ask_yes_no "Save these spawn commands to a reference file?"; then
-        local outfile="$SERVER_DIR/npc_spawn_commands.txt"
-        {
-            printf '# %s (entry %s) — %s\n' "$npc_name" "$npc_entry" "$(date '+%Y-%m-%d %H:%M')"
-            printf '# Stormwind (Alliance, map 0)\n'
-            printf 'npc add %s 0 %s %s 94.1 3.7\n' "$npc_entry" "$sw_x" "$sw_y"
-            printf '# Orgrimmar (Horde, map 1)\n'
-            printf 'npc add %s 1 %s %s 17.5 4.5\n' "$npc_entry" "$og_x" "$og_y"
-            printf '\n'
-        } >> "$outfile"
-        print_success "Commands saved to: $outfile"
+# ─────────────────────────────────────────────────────────────
+# IN-GAME COMMANDS FILE HELPERS
+#   _cmd_block_for KEY      — print static command data block for a mod key
+#   upsert_mod_commands KEY — write/replace === key === section in ingame-commands.txt
+#   remove_mod_commands KEY — remove === key === section from ingame-commands.txt
+#   show_ingame_commands    — display ingame-commands.txt with colour formatting
+# ─────────────────────────────────────────────────────────────
+
+_cmd_block_for() {
+    local key="$1"
+    case "$key" in
+        mod-1v1-arena)
+            printf '%s\n' \
+                '1v1 Arena' \
+                'Private one-on-one arena duels. Players can queue from anywhere, challenge others, and track wins/losses. Fully automatic — requires no GM setup beyond placing the Battlemaster NPC.' \
+                '' \
+                'Commands:' \
+                '.q1v1 rated              — Queue for a rated 1v1 arena match' \
+                '.q1v1 unrated            — Queue for an unrated 1v1 arena match' \
+                '.q1v1 stats              — View your personal 1v1 win/loss statistics' \
+                '' \
+                'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
+                'npc add 999991 0 -8828.3 630.2 94.1 3.7   — Stormwind Arena Battlemaster (Alliance)' \
+                'npc add 999991 1 1600.2 -4413.7 17.5 4.5  — Orgrimmar Arena Battlemaster (Horde)'
+            ;;
+        mod-ah-bot)
+            printf '%s\n' \
+                'Auction House Bot' \
+                'Populates the Auction House with NPC-driven listings so players always have items to buy and sell. Configurable pricing, quantity, and categories. Requires a dedicated bot character.' \
+                '' \
+                'Commands (GM Rank 3+ only):' \
+                '[GM] .ahbotoptions minprice <n>     — Set minimum item price' \
+                '[GM] .ahbotoptions maxprice <n>     — Set maximum item price' \
+                '[GM] .ahbotoptions mintime <n>      — Set minimum auction duration (hours)' \
+                '[GM] .ahbotoptions maxtime <n>      — Set maximum auction duration (hours)' \
+                '[GM] .ahbotoptions minbidprice <n>  — Minimum bid price multiplier' \
+                '[GM] .ahbotoptions maxbidprice <n>  — Maximum bid price multiplier' \
+                '[GM] .ahbotoptions maxstack <n>     — Max stack size per listing' \
+                '[GM] .ahbotoptions minitem <n>      — Minimum different items in AH' \
+                '[GM] .ahbotoptions maxitem <n>      — Maximum different items in AH' \
+                '[GM] .ahbotoptions buyprice <n>     — Buyout price multiplier' \
+                '[GM] .ahbotoptions seller <n>       — Enable/disable bot as seller (1/0)' \
+                '[GM] .ahbotoptions buyer <n>        — Enable/disable bot as buyer (1/0)' \
+                '[GM] .ahbotoptions allfaction <n>   — Apply to all factions (1/0)' \
+                '[GM] .ahbotoptions alliance <n>     — Configure Alliance AH separately' \
+                '[GM] .ahbotoptions horde <n>        — Configure Horde AH separately'
+            ;;
+        mod-autobalance)
+            printf '%s\n' \
+                'AutoBalance' \
+                'Dynamically scales dungeon and raid difficulty based on player count, so solo or small-group play is viable. Supports per-dungeon overrides and level scaling.' \
+                '' \
+                'Commands (GM only):' \
+                '[GM] .autobalance getoffset     — Get difficulty offset for current map' \
+                '[GM] .autobalance setoffset <n> — Set difficulty offset for current map' \
+                '[GM] .autobalance mapstat       — Show AutoBalance stats for current map' \
+                '[GM] .autobalance creaturestat  — Show AutoBalance stats for target creature' \
+                '' \
+                'Aliases: .ab getoffset / .ab setoffset / .ab mapstat / .ab creaturestat'
+            ;;
+        mod-challenge-modes)
+            printf '%s\n' \
+                'Challenge Modes' \
+                'Adds optional self-imposed difficulty rules — Hardcore (death = permadeath), Semi-Hardcore, Ironman, and more. Players opt-in via an NPC (Shrine of Challenge) or the game settings menu. Requires EnablePlayerSettings = 1 in worldserver.conf.' \
+                '' \
+                'Commands: (none — all functionality is accessed through the Shrine of Challenge NPC or in-game Settings menu)' \
+                '' \
+                'Configuration: edit mod_challenge_modes.conf after a worldserver rebuild.'
+            ;;
+        mod-solocraft)
+            printf '%s\n' \
+                'SoloCraft' \
+                'Automatically buffs solo players in group content (dungeons, raids) to make progression viable. Scales stats dynamically — fully automatic, no player commands needed.' \
+                '' \
+                'Commands: (none — fully automatic)'
+            ;;
+        mod-transmog)
+            printf '%s\n' \
+                'Transmogrification' \
+                'Lets players change the visual appearance of gear without changing stats. Requires a Transmogrifier NPC placed in the world (entry 190010). Optionally portable and/or toggleable via commands.' \
+                '' \
+                'Commands:' \
+                '.transmog                — Show current transmog status' \
+                '.transmog sync           — Sync transmog visuals' \
+                '.transmog portable       — Toggle portable transmog (interact from anywhere)' \
+                '.transmog interface      — Open transmog UI without the NPC' \
+                '.transmog disclaimer     — Show transmog usage disclaimer' \
+                '[GM] .transmog add <id>  — Add item to transmog collection by item ID' \
+                '[GM] .transmog check     — Check transmog database integrity' \
+                '[GM] .transmog reload    — Reload transmog script' \
+                '' \
+                'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
+                'npc add 190010 0 -8831.3 628.2 94.1 3.7   — Transmogrifier NPC, Stormwind (Alliance)' \
+                'npc add 190010 1 1597.2 -4415.7 17.5 4.5  — Transmogrifier NPC, Orgrimmar (Horde)'
+            ;;
+        mod-individual-progression)
+            printf '%s\n' \
+                'Individual Progression' \
+                'NOTICE: This module repository could not be verified on GitHub — installation may fail.' \
+                'Tracks each player'"'"'s individual content progression, unlocking new tiers as they complete content.' \
+                '' \
+                'Commands: (check module conf after install if the module is available)'
+            ;;
+        mod-player-bot-level-brackets)
+            printf '%s\n' \
+                'Player Bot Level Brackets' \
+                'Restricts AI PlayerBots to operate within configured level brackets, preventing high-level bots from trivialising lower-level content. Requires the Playerbots module.' \
+                '' \
+                'Commands:' \
+                '[ADMIN] .reload          — Reload server scripts (applies bracket config changes without restart)'
+            ;;
+        mod-npc-beastmaster)
+            printf '%s\n' \
+                'NPC Beastmaster' \
+                'Adds a Beastmaster NPC that allows Hunters to tame any pet, including exotic and normally-untameable creatures. Can be summoned anywhere via .beastmaster or placed permanently in capitals (entry 601026).' \
+                '' \
+                'Commands:' \
+                '.beastmaster             — Summon the Beastmaster NPC to your current location' \
+                '.petname rename <name>   — Rename your current pet' \
+                '.petname cancel          — Cancel a pending pet rename' \
+                '' \
+                'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
+                'npc add 601026 0 -8825.3 632.2 94.1 3.7   — White Fang (Beastmaster), Stormwind (Alliance)' \
+                'npc add 601026 1 1603.2 -4411.7 17.5 4.5  — White Fang (Beastmaster), Orgrimmar (Horde)'
+            ;;
+        mod-aoe-loot)
+            printf '%s\n' \
+                'AoE Loot' \
+                'Allows players to loot all nearby corpses simultaneously with a single loot action. Toggleable per-player. Significantly speeds up grinding and farming. No GM configuration needed.' \
+                '' \
+                'Commands:' \
+                '.aoeloot on              — Enable AoE looting for yourself' \
+                '.aoeloot off             — Disable AoE looting for yourself'
+            ;;
+        mod-learn-spells)
+            printf '%s\n' \
+                'Learn Spells on Level Up' \
+                'Automatically teaches players all class spells when they level up, eliminating the need to visit trainers. Configurable to include/exclude specific spell types.' \
+                '' \
+                'Commands: (none — fully automatic on level-up)'
+            ;;
+        mod-junk-to-gold)
+            printf '%s\n' \
+                'Junk to Gold' \
+                'Automatically sells all grey (junk) items in a player'"'"'s bags when they interact with any vendor. Saves time and removes inventory clutter without manual selling.' \
+                '' \
+                'Commands: (none — automatic when visiting any vendor)'
+            ;;
+        battlepass)
+            printf '%s\n' \
+                'Battle Pass (ALE)' \
+                'A seasonal challenge/reward system. Players complete tasks to earn points and claim rewards. Admins manage seasons and reward pools. Requires the Battle Pass Ticker NPC (entry 90100) placed in the world.' \
+                '' \
+                'Commands:' \
+                '.bp status               — View your current Battle Pass progress' \
+                '.bp rewards              — List available rewards this season' \
+                '.bp claim <n>            — Claim reward number n' \
+                '.bp claimall             — Claim all currently available rewards' \
+                '.bp preview              — Preview upcoming rewards' \
+                '.bp help                 — Show Battle Pass command help' \
+                '[GM] .bpadmin season start  — Start a new Battle Pass season' \
+                '[GM] .bpadmin season end    — End the current season' \
+                '[GM] .bpadmin season list   — List all seasons' \
+                '[GM] .bpadmin reward add    — Add a reward to the current season' \
+                '[GM] .bpadmin reward list   — List rewards for the current season' \
+                '[GM] .bpadmin player list   — List player progress for the current season' \
+                '[GM] .bpadmin help          — Show admin command help' \
+                '' \
+                'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
+                'npc add 90100 0 -8819.3 636.2 94.1 3.7   — Battle Pass Ticker, Stormwind (Alliance)' \
+                'npc add 90100 1 1609.2 -4407.7 17.5 4.5  — Battle Pass Ticker, Orgrimmar (Horde)'
+            ;;
+        paragon)
+            printf '%s\n' \
+                'Paragon Anniversary (ALE)' \
+                'A Paragon reputation and anniversary reward system. Players earn paragon points via reputation grinds and receive bonus rewards on server anniversary dates.' \
+                '' \
+                'Commands:' \
+                '.test                    — Debug command (WARNING: no GM guard — any player can use this; appears to be a debug leftover in source code; monitor for abuse)'
+            ;;
+        bmah)
+            printf '%s\n' \
+                'Black Market Auction House (ALE)' \
+                'Adds a Black Market Auction House NPC that lists rare and exclusive items at auction. Requires a companion client addon (AzerothCore-wotlk-client-modifications). NPC entry: 2069430.' \
+                '' \
+                'Commands: (none — all interaction is through the NPC gossip menu)' \
+                '' \
+                'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
+                'npc add 2069430 0 -8816.3 638.2 94.1 3.7   — Black Market AH Auctioneer, Stormwind (Alliance)' \
+                'npc add 2069430 1 1612.2 -4405.7 17.5 4.5  — Black Market AH Auctioneer, Orgrimmar (Horde)'
+            ;;
+        lootpet)
+            printf '%s\n' \
+                'Loot Pet (ALE)' \
+                'Summons a companion pet that automatically picks up nearby loot. Combines well with AoE Loot. Fully automatic once the Lua script is deployed. Uses creature entry 34587 internally.' \
+                '' \
+                'Commands: (none — the pet is summoned and loots automatically)'
+            ;;
+        accountwide)
+            printf '%s\n' \
+                'Account Wide (ALE)' \
+                'Synchronises playtime, reputation, achievements, currencies, and other data across all characters on the same account. Requires a characters DB schema. Individual systems are enabled per-config.' \
+                '' \
+                'Commands:' \
+                '.playtime                — Show total account-wide play time' \
+                '.played                  — Show account-wide played time' \
+                '.awplaytime              — Show account-wide play time (primary alias)' \
+                '.accountplaytime         — Show account-wide play time (alternate alias)' \
+                '.awplayed                — Show account-wide played time (alternate alias)'
+            ;;
+        exchangenpc)
+            printf '%s\n' \
+                'Exchange NPC (ALE)' \
+                'Adds Roboto (entry 1116001), an NPC that lets players exchange currencies, items, and resources. Requires a world SQL file. NPC must be placed in the world after install.' \
+                '' \
+                'Commands: (none — all interaction is through Roboto NPC gossip menu)' \
+                '' \
+                'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
+                'npc add 1116001 0 -8822.3 634.2 94.1 3.7   — Roboto (Exchange NPC), Stormwind (Alliance)' \
+                'npc add 1116001 1 1606.2 -4409.7 17.5 4.5  — Roboto (Exchange NPC), Orgrimmar (Horde)'
+            ;;
+        activechat)
+            printf '%s\n' \
+                'Active Chat (ALE)' \
+                'Broadcasts a configurable activity reminder to all online players at a set interval. Useful for prompting idle players. Fully automatic — no player interaction needed.' \
+                '' \
+                'Commands: (none — message is broadcast on a server timer)'
+            ;;
+        levelupreward)
+            printf '%s\n' \
+                'Level Up Reward (ALE)' \
+                'Automatically grants players an item or currency reward each time they level up. Reward type and quantity are configurable in the Lua script.' \
+                '' \
+                'Commands: (none — reward is granted automatically on level-up)'
+            ;;
+        sod)
+            printf '%s\n' \
+                'Season of Discovery Buff (ALE)' \
+                'Applies a configurable stat buff to all players on login, similar to WoW'"'"'s Season of Discovery rune bonuses. Useful for custom server balancing and boosting new players.' \
+                '' \
+                'Commands: (none — buff is applied automatically on login)'
+            ;;
+        sitmeanrest)
+            printf '%s\n' \
+                'Sit Means Rest (ALE)' \
+                'Automatically applies the Rested XP bonus whenever a player sits down, mimicking inn-style resting anywhere. Duration and regen spell are configurable.' \
+                '' \
+                'Commands: (none — triggered automatically by the /sit emote or sitting action)'
+            ;;
+        unlimitedammo)
+            printf '%s\n' \
+                'Unlimited Ammo (ALE)' \
+                'Allows Hunters and other ranged classes to shoot without consuming ammo. Toggle is per-session. Ships with ENABLED = false and must be configured to activate.' \
+                '' \
+                'Commands:' \
+                '.ua                      — Enable unlimited ammo for yourself (current session only; no .ua off)'
+            ;;
+        portals-capitals)
+            printf '%s\n' \
+                'Portals in All Capitals (SQL Mod)' \
+                'Adds portal game objects to every faction capital city, allowing quick travel between Stormwind, Orgrimmar, and other capitals without a Mage.' \
+                '' \
+                'Commands: (none — portals are world objects; interact with them directly in game)'
+            ;;
+        hearthstone-cd)
+            printf '%s\n' \
+                'Hearthstone Cooldown (SQL Mod)' \
+                'Reduces the Hearthstone cooldown from the WotLK default of 30 minutes. Options: 1 second, 1 minute, 5 minutes, 15 minutes, or 30 minutes (WotLK default).' \
+                '' \
+                'Commands: (none — takes effect after a server restart or .reload spells in-game)'
+            ;;
+        rare-drops)
+            printf '%s\n' \
+                'Rare Drops (SQL Mod)' \
+                'Increases the drop rates of rare-quality items from mobs and bosses, making gear progression feel more rewarding for private servers.' \
+                '' \
+                'Commands: (none — passive database modification, no restart needed)'
+            ;;
+        lvl1-mounts)
+            printf '%s\n' \
+                'Level 1 Mounts (SQL Mod)' \
+                'Lowers the level requirement on all mounts to level 1, so players can ride from the very start of the game. No restart needed.' \
+                '' \
+                'Commands: (none — passive database change, effective immediately)'
+            ;;
+        all-stackables)
+            printf '%s\n' \
+                'All Stackables (SQL Mod)' \
+                'Increases the maximum stack size on all stackable items (potions, reagents, trade goods, etc.) to a configurable amount (default 200).' \
+                '' \
+                'Commands: (none — passive database change, takes effect after server restart)'
+            ;;
+        buff-mobs)
+            printf '%s\n' \
+                'Buff Mobs (SQL Mod)' \
+                'Increases all creature HP, damage, armor, and attack speed (HP×2, DMG×1.5, ARM×1.5) for a more challenging experience. Mutually exclusive with Nerf Mobs, XBuff Mobs, and Baby Mobs.' \
+                '' \
+                'Commands: (none — database multipliers applied to creature_template)'
+            ;;
+        xbuff-mobs)
+            printf '%s\n' \
+                'XBuff Mobs — Extreme Difficulty (SQL Mod)' \
+                'Significantly increases all creature stats (HP×4, DMG×2, ARM×2). The hardest mob difficulty option. Mutually exclusive with all other mob tweak SQL mods.' \
+                '' \
+                'Commands: (none — database multipliers applied to creature_template)'
+            ;;
+        nerf-mobs)
+            printf '%s\n' \
+                'Nerf Mobs (SQL Mod)' \
+                'Reduces all creature stats (HP×0.5, DMG×0.75, ARM×0.75) for an easier experience. Mutually exclusive with Buff Mobs, XBuff Mobs, and Baby Mobs.' \
+                '' \
+                'Commands: (none — database multipliers applied to creature_template)'
+            ;;
+        baby-mobs)
+            printf '%s\n' \
+                'Baby Mobs — Trivial Difficulty (SQL Mod)' \
+                'Drastically reduces all creature stats (HP×0.25, DMG×0.25, ARM×0.25). Best for testing or casual play. Mutually exclusive with all other mob tweak SQL mods.' \
+                '' \
+                'Commands: (none — database multipliers applied to creature_template)'
+            ;;
+        npc-teleporter)
+            printf '%s\n' \
+                'NPC Teleporter (SQL Mod)' \
+                'Adds a teleporter NPC to capital cities and/or starting zones, allowing players to fast-travel to major locations including raids and dungeons. ONY_LEVEL controls Onyxia level requirement.' \
+                '' \
+                'Commands: (none — all interaction through the NPC gossip teleport menu)'
+            ;;
+        xp-rates)
+            printf '%s\n' \
+                'XP Rates (SQL Mod)' \
+                'Adjusts kill, quest, and exploration XP multipliers in worldserver.conf. Requires a reload config or server restart to apply changes.' \
+                '' \
+                'Commands: (none — edits worldserver.conf; use .reload config in-game to apply without a full restart)'
+            ;;
+        custom-login)
+            printf '%s\n' \
+                'Custom Login (SQL Mod / Module)' \
+                'Gives new characters starter items, spells, or buffs on first login. Configurable via mod_customlogin.conf.' \
+                '' \
+                'Commands: (none — triggers automatically on first character login)'
+            ;;
+        mod-ale)
+            printf '%s\n' \
+                'AzerothCore Lua Engine (ALE)' \
+                'The core C++ module that enables Lua scripting on AzerothCore. Required by all ALE Lua Mods. Exposes server events to Lua scripts placed in the lua_scripts/ directory.' \
+                '' \
+                'Commands:' \
+                '[GM] .reload ale         — Reload all Lua scripts without restarting the worldserver'
+            ;;
+    esac
+}
+
+# Write or replace the === key === section in INGAME_COMMANDS_FILE.
+# Uses unique temp files + atomic mv to avoid partial writes.
+# Pass --quiet as second argument to suppress the print_info notification.
+upsert_mod_commands() {
+    local key="$1" quiet="${2:-}"
+    local content; content=$(_cmd_block_for "$key")
+    [ -z "$content" ] && return 0
+
+    local outfile="$INGAME_COMMANDS_FILE"
+    [ -z "$outfile" ] && return 0
+    local marker="=== ${key} ==="
+
+    local tmpblock; tmpblock=$(mktemp)
+    printf '%s\n%s\n' "$marker" "$content" > "$tmpblock"
+
+    if [ ! -f "$outfile" ]; then
+        mv "$tmpblock" "$outfile"
+        [ "$quiet" != "--quiet" ] && print_info "📋 In-game commands reference created: $outfile"
+        return 0
     fi
+
+    if grep -Fxq "$marker" "$outfile" 2>/dev/null; then
+        local tmpout; tmpout=$(mktemp)
+        awk -v marker="$marker" -v newfile="$tmpblock" '
+        $0 == marker {
+            while ((getline line < newfile) > 0) print line
+            close(newfile)
+            skip=1; next
+        }
+        skip && /^=== .+ ===$/ { skip=0 }
+        !skip { print }
+        ' "$outfile" > "$tmpout" && mv "$tmpout" "$outfile"
+    else
+        printf '\n' >> "$outfile"
+        cat "$tmpblock" >> "$outfile"
+    fi
+    rm -f "$tmpblock"
+    [ "$quiet" != "--quiet" ] && print_info "📋 In-game commands reference updated: $outfile"
+}
+
+# Remove the === key === section from INGAME_COMMANDS_FILE.
+remove_mod_commands() {
+    local key="$1"
+    local outfile="$INGAME_COMMANDS_FILE"
+    [ -z "$outfile" ] || [ ! -f "$outfile" ] && return 0
+    local marker="=== ${key} ==="
+    grep -Fxq "$marker" "$outfile" 2>/dev/null || return 0
+
+    local tmpout; tmpout=$(mktemp)
+    awk -v marker="$marker" '
+    $0 == marker { skip=1; next }
+    skip && /^=== .+ ===$/ { skip=0 }
+    !skip { print }
+    ' "$outfile" > "$tmpout" && mv "$tmpout" "$outfile"
+    print_info "📋 Removed $key from in-game commands reference."
+}
+
+# Print INGAME_COMMANDS_FILE to the terminal with basic colour formatting.
+show_ingame_commands() {
+    local outfile="$INGAME_COMMANDS_FILE"
+    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    if [ -z "$outfile" ] || [ ! -f "$outfile" ] || [ ! -s "$outfile" ]; then
+        echo ""
+        print_info "No in-game commands recorded yet."
+        print_info "Install any mod (Modules, ALE Lua Mods, or SQL Mods) to populate this file."
+        echo ""
+        press_enter
+        return
+    fi
+
+    echo ""
+    echo -e "  ${GOLD}${BOLD}In-Game Commands Reference${RST}"
+    echo -e "  ${GOLD}══════════════════════════════════════════════${RST}"
+    echo -e "  ${DIM}Source: $outfile${RST}"
+    echo ""
+
+    while IFS= read -r line; do
+        if [[ "$line" == "=== "* ]]; then
+            echo -e "\n  ${GOLD}${BOLD}${line}${RST}"
+        elif [[ "$line" == "Commands:"* ]] || [[ "$line" == "NPC Spawn Commands"* ]]; then
+            echo -e "  ${WHITE}${BOLD}${line}${RST}"
+        elif [[ "$line" == "."* ]] || [[ "$line" == "[GM]"* ]] || \
+             [[ "$line" == "[ADMIN]"* ]] || [[ "$line" == "npc add"* ]]; then
+            echo -e "  ${CYAN}${line}${RST}"
+        elif [[ "$line" == "(none"* ]] || [[ "$line" == "WARNING:"* ]] || \
+             [[ "$line" == "NOTICE:"* ]]; then
+            echo -e "  ${YELLOW}${line}${RST}"
+        elif [[ -z "$line" ]]; then
+            echo ""
+        else
+            echo -e "  ${line}"
+        fi
+    done < "$outfile"
+
+    echo ""
+    echo -e "  ${DIM}Full file: $outfile${RST}"
+    echo ""
+    press_enter
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -303,6 +744,7 @@ WORLD_CONTAINER=""
 DB_CONTAINER=""
 AUTH_CONTAINER=""
 DB_ROOT_PASSWORD="password"   # acore-docker default
+INGAME_COMMANDS_FILE=""       # set to $SERVER_DIR/ingame-commands.txt after detect_install
 
 # Session counter for NPC spawn coordinate staggering (deterministic per known entry)
 _NPC_SPAWN_IDX=0
@@ -409,6 +851,7 @@ detect_install() {
 
     # Find running containers (will be empty if server is stopped — that's OK)
     refresh_container_names
+    INGAME_COMMANDS_FILE="$SERVER_DIR/ingame-commands.txt"
 }
 
 # Classify an install by looking at directory name AND, if needed,
@@ -2566,6 +3009,10 @@ ale_script_install() {
                 print_info "Remember to apply SQL manually from:"
                 print_info "  $clone_dir/sql/"
             fi
+            echo ""
+            print_info "Battle Pass Ticker (entry 90100) needs to be placed in the world."
+            _offer_npc_in_capitals 90100 "Battle Pass Ticker" \
+                "Run after reloading ALE scripts or restarting the worldserver."
             ;;
         paragon)
             echo ""
@@ -2578,6 +3025,10 @@ ale_script_install() {
             if ask_yes_no "Configure Black Market AH (NPC ID + client addon info) now?"; then
                 configure_ale_bmah
             fi
+            echo ""
+            print_info "Black Market AH Auctioneer (entry 2069430) needs to be placed in the world."
+            _offer_npc_in_capitals 2069430 "Black Market AH Auctioneer" \
+                "Run after reloading ALE scripts or restarting the worldserver."
             ;;
         sitmeanrest)
             echo ""
@@ -2602,6 +3053,7 @@ ale_script_install() {
     echo ""
     print_info "Reload Lua scripts in-game with: ${CYAN}.reload ale${RST}"
     print_info "Or restart the worldserver from the main menu."
+    upsert_mod_commands "$key"
     return 0
 }
 
@@ -2671,6 +3123,7 @@ ale_script_remove() {
     fi
 
     print_info "(Database tables created by this script are kept — removing them risks data loss.)"
+    remove_mod_commands "$key"
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -2848,6 +3301,7 @@ _sqlmod_install_clone_sql() {
     if sqlmod_run_sql_file "acore_world" "$up_sql"; then
         touch "$SQLMOD_MARKER_DIR/$key.installed"
         print_success "$name installed successfully!"
+        upsert_mod_commands "$key"
     else
         print_error "SQL apply failed for $name"
         return 1
@@ -2880,6 +3334,7 @@ _sqlmod_install_hearthstone() {
     if sqlmod_run_sql_file "acore_world" "$sql_file"; then
         echo "HEARTHSTONE_COOLDOWN=$cooldown_choice" > "$SQLMOD_MARKER_DIR/$key.installed"
         print_success "$name installed ($cooldown_choice)!"
+        upsert_mod_commands "$key"
     else
         print_error "SQL apply failed"
         return 1
@@ -2932,10 +3387,10 @@ _sqlmod_install_clone_dist() {
 
     touch "$SQLMOD_MARKER_DIR/$key.installed"
     print_success "$name installed successfully!"
+    upsert_mod_commands "$key"
 }
 
-_sqlmod_install_conf_module() {
-    local key="$1" name="$2" url="$3"
+_sqlmod_install_conf_module() {    local key="$1" name="$2" url="$3"
     local module_dir="$SERVER_DIR/modules/$key"
     if [ -d "$module_dir/.git" ]; then
         print_info "Updating $key module..."
@@ -2958,6 +3413,7 @@ _sqlmod_install_conf_module() {
     print_success "$name cloned to modules/!"
     print_warning "A worldserver rebuild is required to activate this module."
     print_info "Use 'Rebuild worldserver' from the main menu to compile."
+    upsert_mod_commands "$key"
 }
 
 _sqlmod_install_tweak() {
@@ -3005,6 +3461,7 @@ _sqlmod_install_tweak() {
             "$h_mult" "$d_mult" "$a_mult" "$spd_mult" > "$SQLMOD_MARKER_DIR/$key.installed"
         print_success "$name applied!"
         print_warning "Applying again stacks multipliers. Use Remove to reverse."
+        upsert_mod_commands "$key"
     else
         print_error "SQL failed for $name"
         return 1
@@ -3024,6 +3481,7 @@ sqlmod_remove() {
             if ! ask_yes_no "Remove $name module directory? A rebuild will be required."; then return 0; fi
             rm -rf "$SERVER_DIR/modules/$key"
             print_success "$name removed. Rebuild worldserver to deactivate."
+            remove_mod_commands "$key"
             return 0
             ;;
         conf_xp)
@@ -3109,6 +3567,7 @@ _sqlmod_remove_clone_sql() {
     if sqlmod_run_sql_file "acore_world" "$down_sql"; then
         rm -f "$SQLMOD_MARKER_DIR/$key.installed"
         print_success "$name removed!"
+        remove_mod_commands "$key"
     else
         print_error "SQL remove failed"
         return 1
@@ -3123,6 +3582,7 @@ _sqlmod_remove_hearthstone() {
     if sqlmod_run_sql "acore_world" "$sql"; then
         rm -f "$SQLMOD_MARKER_DIR/$key.installed"
         print_success "$name removed (30-min cooldown restored)!"
+        remove_mod_commands "$key"
     else
         print_error "SQL reset failed"; return 1
     fi
@@ -3137,13 +3597,13 @@ _sqlmod_remove_npc_teleporter() {
     if sqlmod_run_sql "acore_world" "$sql"; then
         rm -f "$SQLMOD_MARKER_DIR/$key.installed"
         print_success "$name removed!"
+        remove_mod_commands "$key"
     else
         print_error "SQL removal failed"; return 1
     fi
 }
 
-_sqlmod_remove_tweak() {
-    local key="$1" name="$2"
+_sqlmod_remove_tweak() {    local key="$1" name="$2"
     local marker_file="$SQLMOD_MARKER_DIR/$key.installed"
 
     # Known defaults per tweak (fallback if marker lacks APPLIED_* values)
@@ -3182,13 +3642,13 @@ _sqlmod_remove_tweak() {
     if sqlmod_run_sql "acore_world" "$sql"; then
         rm -f "$SQLMOD_MARKER_DIR/$key.installed"
         print_success "$name reversed!"
+        remove_mod_commands "$key"
     else
         print_error "SQL failed"; return 1
     fi
 }
 
-_sqlmod_remove_xprates() {
-    local conf_path="$SERVER_DIR/env/dist/etc/worldserver.conf"
+_sqlmod_remove_xprates() {    local conf_path="$SERVER_DIR/env/dist/etc/worldserver.conf"
     if [ ! -f "$conf_path" ]; then
         print_error "worldserver.conf not found at $conf_path"; return 1
     fi
@@ -4160,6 +4620,7 @@ menu_modules() {
                 for entry in "${to_install[@]}"; do
                     IFS='|' read -r key name url sql_dirs <<< "$entry"
                     module_install "$key" "$name" "$url" "$sql_dirs" || true
+                    upsert_mod_commands "$key"
                     echo ""
                 done
                 print_info "Modules cloned. SQL files will be applied automatically on next server start."
@@ -4241,6 +4702,9 @@ menu_modules() {
                 fi
                 printf '\033[%d;1H\033[J' "$MENU_START_ROW"
                 module_remove "$key" "$name"
+                if ! module_is_installed "$key"; then
+                    remove_mod_commands "$key"
+                fi
                 if [ "$SERVER_TYPE" = "playerbots" ]; then
                     echo ""
                     print_info "Rebuild needed for module removal to take effect."
@@ -5087,6 +5551,7 @@ main_menu() {
         printf "  ${WHITE}12)${RST} View logs\n"
         printf "  ${WHITE}13)${RST} Attach to console\n"
         printf "  ${WHITE}14)${RST} Server maintenance\n"
+        printf "  ${WHITE}15)${RST} View In-Game Commands\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${GOLD} Q)${RST} Quit\n"
 
@@ -5111,6 +5576,7 @@ main_menu() {
             12) with_full_screen server_logs ;;
             13) with_full_screen server_attach ;;
             14) menu_server_maintenance ;;
+            15) show_ingame_commands ;;
             q)  echo ""; print_info "Goodbye!"; exit 0 ;;
         esac
     done
@@ -5119,7 +5585,45 @@ main_menu() {
 # ─────────────────────────────────────────────────────────────
 # ENTRYPOINT
 # ─────────────────────────────────────────────────────────────
+
+# Scan all three mod registries and silently populate ingame-commands.txt
+# for any mods already installed. Handles upgrades from older manager versions
+# that pre-date the commands file system.
+sync_ingame_commands_for_installed() {
+    [ -z "$INGAME_COMMANDS_FILE" ] && return 0
+    local key name entry count=0
+
+    for entry in "${MODULE_REGISTRY[@]}"; do
+        IFS='|' read -r key name _ _ <<< "$entry"
+        if module_is_installed "$key"; then
+            upsert_mod_commands "$key" --quiet
+            count=$((count + 1))
+        fi
+    done
+
+    for entry in "${ALE_SCRIPT_REGISTRY[@]}"; do
+        IFS='|' read -r key name _ <<< "$entry"
+        if ale_script_is_installed "$key"; then
+            upsert_mod_commands "$key" --quiet
+            count=$((count + 1))
+        fi
+    done
+
+    sqlmod_init
+    for entry in "${SQL_MOD_REGISTRY[@]}"; do
+        IFS='|' read -r key name _ _ <<< "$entry"
+        if sqlmod_is_installed "$key"; then
+            upsert_mod_commands "$key" --quiet
+            count=$((count + 1))
+        fi
+    done
+
+    [ "$count" -gt 0 ] && \
+        print_info "📋 In-game commands reference synced for $count installed mod(s): $INGAME_COMMANDS_FILE"
+}
+
 start_logo_animation
 detect_install
+sync_ingame_commands_for_installed
 show_first_run_welcome
 main_menu
