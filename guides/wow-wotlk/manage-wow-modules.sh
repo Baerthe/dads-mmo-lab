@@ -95,6 +95,7 @@ declare -a MODULE_REGISTRY=(
     "mod-autobalance|Auto Balance (dynamic difficulty)|https://github.com/azerothcore/mod-autobalance.git|world"
     "mod-transmog|Transmogrification|https://github.com/azerothcore/mod-transmog.git|world,characters"
     "mod-1v1-arena|1v1 Arena|https://github.com/azerothcore/mod-1v1-arena.git|characters"
+    "mod-ale|AzerothCore Lua Engine (ALE)|https://github.com/azerothcore/mod-ale.git|"
 )
 
 # ─────────────────────────────────────────────────────────────
@@ -520,6 +521,7 @@ declare -a MODULE_UPDATE_FILES=(
     "mod-learn-spells|acore_world|"
     "mod-individual-progression|acore_world|"
     "mod-autobalance|acore_world|"
+    "mod-ale|acore_world|"
 )
 
 # Discover the actual SQL filenames in a module's sql dir.
@@ -1067,6 +1069,69 @@ configure_ahbot() {
 }
 
 # ─────────────────────────────────────────────────────────────
+# ALE CONFIGURATION
+# ─────────────────────────────────────────────────────────────
+# Post-install setup for mod-ale (AzerothCore Lua Engine):
+#   1. Creates the lua_scripts directory in env/dist/etc/modules/
+#   2. Copies mod_ale.conf.dist → mod_ale.conf (skip if already exists)
+#   3. Patches ALE.ScriptPath to the container-visible absolute path
+#
+# env/dist/etc/ is volume-mounted to /azerothcore/env/dist/etc/ inside
+# the container, so writing here is equivalent to writing inside the
+# container — no docker cp needed.
+configure_ale() {
+    print_step "Configuring AzerothCore Lua Engine (ALE)"
+
+    if ! module_is_installed "mod-ale"; then
+        print_error "mod-ale is not installed yet!"
+        print_info "Add it first via the main menu (Add modules)."
+        return 1
+    fi
+
+    # ── Create the lua_scripts directory ─────────────────────
+    local lua_scripts_dir="$SERVER_DIR/env/dist/etc/modules/lua_scripts"
+    print_info "Creating lua_scripts directory..."
+    if mkdir -p "$lua_scripts_dir"; then
+        print_success "Created: $lua_scripts_dir"
+    else
+        print_error "Failed to create lua_scripts directory."
+        return 1
+    fi
+
+    # ── Copy dist conf if no active conf exists yet ───────────
+    local conf_dist="$SERVER_DIR/modules/mod-ale/conf/mod_ale.conf.dist"
+    local conf_active="$SERVER_DIR/env/dist/etc/modules/mod_ale.conf"
+
+    if [ ! -f "$conf_dist" ]; then
+        print_error "Couldn't find $conf_dist"
+        print_info "The module may not have cloned correctly."
+        return 1
+    fi
+
+    mkdir -p "$SERVER_DIR/env/dist/etc/modules"
+    if [ -f "$conf_active" ]; then
+        print_info "Active conf already exists — keeping it, updating ScriptPath only."
+    else
+        cp "$conf_dist" "$conf_active"
+        print_success "Copied conf to: $conf_active"
+    fi
+
+    # ── Patch ALE.ScriptPath to the container-visible path ───
+    # Always applied so the path is correct whether this is a fresh copy
+    # or an existing file (e.g. after a server directory move).
+    sed -i \
+        's|^[[:space:]]*ALE\.ScriptPath[[:space:]]*=.*$|ALE.ScriptPath = "/azerothcore/env/dist/etc/modules/lua_scripts"|' \
+        "$conf_active"
+    print_success "Set ALE.ScriptPath = \"/azerothcore/env/dist/etc/modules/lua_scripts\""
+
+    echo ""
+    print_info "ALE configuration complete."
+    print_info "Place your Lua scripts in:"
+    print_info "  $lua_scripts_dir"
+    print_info "Restart the worldserver for changes to take effect."
+}
+
+# ─────────────────────────────────────────────────────────────
 # MAIN MENUS
 # ─────────────────────────────────────────────────────────────
 menu_add() {
@@ -1156,6 +1221,13 @@ menu_add() {
             print_info "AH Bot is installed but not yet configured."
             if ask_yes_no "Configure AH Bot now (assign a bot character)?"; then
                 configure_ahbot
+            fi
+        fi
+        if [ "$key" = "mod-ale" ]; then
+            echo ""
+            print_info "ALE requires post-install setup (lua_scripts dir + conf)."
+            if ask_yes_no "Configure ALE now?"; then
+                configure_ale
             fi
         fi
     done
@@ -1305,8 +1377,8 @@ show_first_run_welcome() {
     echo -e "${WHITE}${BOLD}A few things to know:${RST}"
     echo ""
     echo -e "${GREEN}  ✓${RST} ${WHITE}Nothing changes until you explicitly choose an action.${RST}"
-    echo -e "${WHITE}    The menu options 3 (List modules), 6 (Server status),${RST}"
-    echo -e "${WHITE}    and 10 (View logs) are completely read-only — safe to${RST}"
+    echo -e "${WHITE}    The menu options 3 (List modules), 7 (Server status),${RST}"
+    echo -e "${WHITE}    and 11 (View logs) are completely read-only — safe to${RST}"
     echo -e "${WHITE}    poke around and see what your install looks like.${RST}"
     echo ""
     echo -e "${GREEN}  ✓${RST} ${WHITE}You'll be asked before anything destructive.${RST}"
@@ -1317,19 +1389,19 @@ show_first_run_welcome() {
     echo -e "${WHITE}    On Steam Deck this takes 30-90 minutes. Plug in and${RST}"
     echo -e "${WHITE}    keep the device on a flat surface for airflow.${RST}"
     echo ""
-    echo -e "${GREEN}  ✓${RST} ${WHITE}The repair function (option 12) only clears SQL update${RST}"
+    echo -e "${GREEN}  ✓${RST} ${WHITE}The repair function (option 13) only clears SQL update${RST}"
     echo -e "${WHITE}    tracking rows. It never drops database tables.${RST}"
     echo ""
     if [ "$user_module_count" -eq 0 ]; then
         echo -e "${WHITE}${BOLD}Suggested first steps for a fresh install:${RST}"
-        echo -e "${WHITE}  1. Option ${CYAN}6${WHITE} (Server status) — see what containers are running${RST}"
+        echo -e "${WHITE}  1. Option ${CYAN}7${WHITE} (Server status) — see what containers are running${RST}"
         echo -e "${WHITE}  2. Option ${CYAN}3${WHITE} (List modules) — see what's installed${RST}"
         echo -e "${WHITE}  3. When ready: option ${CYAN}1${WHITE} (Add modules) — add AH Bot, etc.${RST}"
     else
         echo -e "${WHITE}${BOLD}Useful options for an existing install:${RST}"
         echo -e "${WHITE}  • Option ${CYAN}3${WHITE} (List modules) — see what's already installed${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}6${WHITE} (Server status) — check container state${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}12${WHITE} (Repair) — if ac-db-import is failing${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}7${WHITE} (Server status) — check container state${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}13${WHITE} (Repair) — if ac-db-import is failing${RST}"
     fi
     echo ""
     echo -e "${DIM}This welcome shows once per install. The marker file at${RST}"
@@ -1366,18 +1438,19 @@ main_menu() {
         echo -e "${WHITE}    2) Remove modules${RST}"
         echo -e "${WHITE}    3) List installed modules${RST}"
         echo -e "${WHITE}    4) Configure / reconfigure AH Bot${RST}"
-        echo -e "${WHITE}    5) Rebuild worldserver${RST}"
+        echo -e "${WHITE}    5) Configure / reconfigure ALE (Lua Engine)${RST}"
+        echo -e "${WHITE}    6) Rebuild worldserver${RST}"
         echo ""
         echo -e "  ${GOLD}── Server Controls ──${RST}"
-        echo -e "${WHITE}    6) Server status${RST}"
-        echo -e "${WHITE}    7) Start server${RST}"
-        echo -e "${WHITE}    8) Stop server${RST}"
-        echo -e "${WHITE}    9) Restart server${RST}"
-        echo -e "${WHITE}   10) View worldserver logs${RST}"
-        echo -e "${WHITE}   11) Attach to worldserver console${RST}"
+        echo -e "${WHITE}    7) Server status${RST}"
+        echo -e "${WHITE}    8) Start server${RST}"
+        echo -e "${WHITE}    9) Stop server${RST}"
+        echo -e "${WHITE}   10) Restart server${RST}"
+        echo -e "${WHITE}   11) View worldserver logs${RST}"
+        echo -e "${WHITE}   12) Attach to worldserver console${RST}"
         echo ""
         echo -e "  ${GOLD}── Troubleshooting ──${RST}"
-        echo -e "${WHITE}   12) Repair install state (clear stuck SQL update tracking)${RST}"
+        echo -e "${WHITE}   13) Repair install state (clear stuck SQL update tracking)${RST}"
         echo ""
         echo -e "${WHITE}    Q) Quit${RST}"
         echo ""
@@ -1388,14 +1461,15 @@ main_menu() {
             2)  menu_remove ;;
             3)  menu_list ;;
             4)  configure_ahbot; press_enter ;;
-            5)  rebuild_worldserver; press_enter ;;
-            6)  server_status; press_enter ;;
-            7)  server_start; press_enter ;;
-            8)  server_stop; press_enter ;;
-            9)  server_restart; press_enter ;;
-            10) server_logs ;;
-            11) server_attach; press_enter ;;
-            12) repair_install_state; press_enter ;;
+            5)  configure_ale; press_enter ;;
+            6)  rebuild_worldserver; press_enter ;;
+            7)  server_status; press_enter ;;
+            8)  server_start; press_enter ;;
+            9)  server_stop; press_enter ;;
+            10) server_restart; press_enter ;;
+            11) server_logs ;;
+            12) server_attach; press_enter ;;
+            13) repair_install_state; press_enter ;;
             q)  echo ""; print_info "Goodbye!"; exit 0 ;;
         esac
     done
