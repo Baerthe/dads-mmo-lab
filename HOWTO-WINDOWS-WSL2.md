@@ -1,9 +1,9 @@
 # 🪟 How to Install on Windows — WSL2 Guide
 
-> Run your offline WoW server on any Windows 10 or 11 PC.
+> Run offline MMO servers on any Windows 10 or 11 PC.
 > No Steam Deck required!
 >
-> **Estimated time:** 45-60 minutes (Base WoW)
+> **Estimated time:** 30–45 minutes setup, then your game's install time
 > **Difficulty:** Beginner friendly — just copy and paste!
 
 ---
@@ -11,10 +11,10 @@
 ## 📋 What You Need
 
 - ✅ Windows 10 (version 2004 or later) or Windows 11
-- ✅ At least **15GB** free storage (30GB+ for Playerbots)
-- ✅ A WoW 3.3.5a client already installed on your Windows PC
+- ✅ At least **15GB** free storage per game (30GB+ for WoW with Playerbots)
+- ✅ Your game client already installed on Windows (WoW 3.3.5a, etc.)
 - ✅ Internet connection for the initial download
-- ✅ A PC that was made in the last 8 years (virtualization support required)
+- ✅ A PC made in the last 8 years (virtualization support required)
 
 > **Not sure which Windows version you have?**
 > Press **Windows key + R**, type `winver`, press Enter.
@@ -22,17 +22,24 @@
 
 ---
 
+## 🎮 What Games Can I Install?
+
+All of the following work on Windows via WSL2:
+
+| Game | Installer | Install time |
+|------|-----------|-------------|
+| ⚔️ WoW Vanilla 1.12 | `install-wow-vanilla.sh` | ~30 min |
+| ⚔️ WoW The Burning Crusade 2.4.3 | `install-wow-tbc.sh` | ~30 min |
+| ⚔️ WoW Wrath of the Lich King 3.3.5a | `install-wow-wotlk.sh` | ~30 min |
+| 🏃 RuneScape 2009 | `install-runescape.sh` | ~5 min |
+
+---
+
 ## 🧠 What is WSL2 and Why Do We Need It?
 
-The WoW server runs on Linux. Your PC runs Windows. WSL2
-(Windows Subsystem for Linux 2) is a feature built into
-Windows that lets you run a full Linux environment right
-inside Windows — no rebooting, no dual boot, no virtual
-machine headaches.
+The game servers run on Linux. Your PC runs Windows. WSL2 (Windows Subsystem for Linux 2) is a feature built into Windows that lets you run a full Linux environment right inside Windows — no rebooting, no dual boot, no virtual machine headaches.
 
-Think of it like a Linux terminal that lives inside Windows.
-The server runs there. Your WoW client stays on Windows
-and connects to it just like on the Steam Deck.
+Think of it like a Linux terminal that lives inside Windows. The servers run there. Your game client stays on Windows and connects to it.
 
 ---
 
@@ -40,8 +47,7 @@ and connects to it just like on the Steam Deck.
 
 ### Step 1 — Open PowerShell as Administrator
 
-Press the **Windows key**, type `PowerShell`, right-click
-**Windows PowerShell** and click **Run as administrator**.
+Press the **Windows key**, type `PowerShell`, right-click **Windows PowerShell** and click **Run as administrator**.
 
 Click **Yes** when Windows asks for permission.
 
@@ -55,11 +61,9 @@ In the PowerShell window, paste this and press Enter:
 wsl --install
 ```
 
-Windows will install WSL2 and Ubuntu automatically.
-This takes about 5 minutes.
+Windows will install WSL2 and Ubuntu automatically. This takes about 5 minutes.
 
-> If you see an error saying WSL is already installed,
-> skip to Step 3.
+> If you see a message saying WSL is already installed, skip to Step 3.
 
 ---
 
@@ -67,8 +71,7 @@ This takes about 5 minutes.
 
 When the install finishes, **restart your PC**.
 
-After restarting, Ubuntu will finish setting up automatically
-and a terminal window will open.
+After restarting, Ubuntu will finish setting up automatically and a terminal window will open.
 
 ---
 
@@ -84,12 +87,11 @@ Enter new UNIX password:
 **Important:**
 - Use a simple lowercase username with no spaces (example: `deck` or `dad`)
 - The password won't show as you type — that is normal!
-- Remember this password — you will need it when the
-  installer asks for `sudo` permission
+- Remember this password — the installer will ask for it when it needs admin permission
 
 ---
 
-### Step 5 — Verify WSL2 is Working
+### Step 5 — Verify WSL2 is Running
 
 In PowerShell (not the Ubuntu window), run:
 
@@ -112,44 +114,60 @@ wsl --set-version Ubuntu 2
 
 ---
 
-## 🐳 PART 2 — Install Docker Inside WSL2
+### Step 6 — (Optional but Recommended) Configure WSL2 Memory
 
-Everything from here runs inside the **Ubuntu terminal**,
-not PowerShell. Open Ubuntu from the Start menu if it
-is not already open.
+By default WSL2 can consume a lot of RAM. Create a config file to keep it reasonable.
+
+Open Notepad and save this as `C:\Users\YourName\.wslconfig` (replace YourName with your Windows username):
+
+```ini
+[wsl2]
+memory=6GB
+processors=4
+```
+
+Adjust `memory` to half your system RAM (e.g. `4GB` on an 8GB machine, `8GB` on a 16GB machine). Restart WSL2 after saving:
+
+```powershell
+wsl --shutdown
+```
+
+Then re-open Ubuntu from the Start menu.
 
 ---
 
-### Step 6 — Update Ubuntu
+## 🐳 PART 2 — Install Docker Inside WSL2
+
+Everything from here runs inside the **Ubuntu terminal**, not PowerShell. Open Ubuntu from the Start menu if it is not already open.
+
+---
+
+### Step 7 — Update Ubuntu
 
 ```bash
 sudo apt-get update && sudo apt-get upgrade -y
 ```
 
-Enter your password when asked. This takes 1-2 minutes.
+Enter your password when asked. This takes 1–2 minutes.
 
 ---
 
-### Step 7 — Install Docker Dependencies
+### Step 8 — Install Docker
+
+Run these commands one at a time:
 
 ```bash
-sudo apt-get install -y \
-    ca-certificates \
-    curl \
-    gnupg \
-    lsb-release
+sudo apt-get install -y ca-certificates curl gnupg lsb-release
 ```
-
----
-
-### Step 8 — Add Docker's Official Repository
 
 ```bash
 sudo mkdir -p /etc/apt/keyrings
 
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
     sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+```
 
+```bash
 echo \
   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
   https://download.docker.com/linux/ubuntu \
@@ -157,50 +175,32 @@ echo \
   sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 ```
 
----
-
-### Step 9 — Install Docker Engine
-
 ```bash
 sudo apt-get update
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 ```
 
-This takes 2-3 minutes.
-
 ---
 
-### Step 10 — Start Docker and Set It Up
+### Step 9 — Start Docker and Configure Your User
 
 ```bash
 sudo service docker start
-```
-
-Then add yourself to the docker group so you do not need
-`sudo` for every docker command:
-
-```bash
 sudo usermod -aG docker $USER
-```
-
-Then apply the group change immediately:
-
-```bash
 newgrp docker
 ```
 
 ---
 
-### Step 11 — Verify Docker is Working
+### Step 10 — Verify Docker is Working
 
 ```bash
 docker ps
 ```
 
-You should see an empty table with headers — no errors.
-That means Docker is running correctly!
+You should see an empty table with headers — no errors. That means Docker is running correctly!
 
-> If you see `Cannot connect to the Docker daemon` run:
+> If you see `Cannot connect to the Docker daemon`, run:
 > ```bash
 > sudo service docker start
 > ```
@@ -208,86 +208,91 @@ That means Docker is running correctly!
 
 ---
 
-### Step 12 — Make Docker Start Automatically
+### Step 11 — Make Docker Start Automatically
 
-WSL2 does not have systemctl like a full Linux system,
-so we need to tell Docker to start when Ubuntu opens.
+WSL2 does not use systemd like a full Linux system, so we need to tell Docker to start when Ubuntu opens:
 
 ```bash
 echo 'sudo service docker start > /dev/null 2>&1' >> ~/.bashrc
 ```
 
-Docker will now start automatically every time you open
-the Ubuntu terminal.
+Docker will now start automatically every time you open the Ubuntu terminal.
 
 ---
 
-## ⚔️ PART 3 — Install Your WoW Server
+## ⚔️ PART 3 — Install Your Game Server
 
-### Step 13 — Download the Installer
+### Step 12 — Download Your Installer
+
+Pick your game and run the matching download command in the Ubuntu terminal:
+
+**WoW Wrath of the Lich King 3.3.5a:**
+```bash
+cd ~ && curl -O https://raw.githubusercontent.com/DadsMmoLab/dads-mmo-lab/main/guides/wow-wotlk/install-wow-wotlk.sh
+chmod +x install-wow-wotlk.sh
+```
+
+**WoW The Burning Crusade 2.4.3:**
+```bash
+cd ~ && curl -O https://raw.githubusercontent.com/DadsMmoLab/dads-mmo-lab/main/guides/wow-tbc/install-wow-tbc.sh
+chmod +x install-wow-tbc.sh
+```
+
+**WoW Vanilla 1.12:**
+```bash
+cd ~ && curl -O https://raw.githubusercontent.com/DadsMmoLab/dads-mmo-lab/main/guides/wow-vanilla/install-wow-vanilla.sh
+chmod +x install-wow-vanilla.sh
+```
+
+**RuneScape 2009:** See [Part 7 — RuneScape on WSL2](#-part-7--runescape-2009-on-wsl2) — it has its own section below.
+
+---
+
+### Step 13 — Run the Installer
+
+Run your installer. Replace the filename with whichever you downloaded:
 
 ```bash
-cd ~ && curl -O https://raw.githubusercontent.com/DadsMmoLab/dads-mmo-lab/main/guides/wow-wotlk/install-wow.sh
-chmod +x install-wow.sh
+./install-wow-wotlk.sh
 ```
+
+The wizard is identical to the Steam Deck experience. Follow the prompts.
+
+> The wizard detects Linux automatically. Ignore any references to SteamOS — those steps are skipped on Ubuntu.
 
 ---
 
-### Step 14 — Run the Wizard
+### Step 14 — Wait for Installation
 
-```bash
-./install-wow.sh
-```
+| Game | Time |
+|------|------|
+| WoW Vanilla | ~30 minutes |
+| WoW TBC | ~30 minutes |
+| WoW WotLK | ~30 minutes |
 
-The wizard is identical to the Steam Deck experience.
-Follow the prompts to choose your server type and modules.
+Keep your PC awake and connected during install.
 
-**Recommended for first time:** Choose **Base WoW** — it
-is the fastest install and easiest to get running.
-
-> The wizard will detect Linux automatically.
-> Ignore any references to SteamOS — those steps
-> are skipped automatically on Ubuntu.
-
----
-
-### Step 15 — Wait for Installation
-
-**Base WoW:** About 30 minutes
-
-**NPCBots (pre-built):** About 10-15 minutes
-
-**NPCBots or Playerbots (compile):** 2-4 hours.
-Keep your PC awake and plugged in!
-
-Watch progress in the terminal. When you see:
+When you see:
 
 ```
-✅ Server is READY! ⚔️
+✅ Installation complete!
 ```
 
 You are ready for the next step!
 
 ---
 
-## 👤 PART 4 — Create Your Account
+## 👤 PART 4 — Your Account (WoW)
 
-### Step 16 — Open the GM Console
+The installer automatically creates an **admin / admin** account with GM Level 3. You can use that to log in immediately — no extra setup required.
 
-In the Ubuntu terminal, run:
+To create additional accounts, open the GM console:
 
 ```bash
-docker attach $(docker ps --format '{{.Names}}' | grep worldserver | head -1)
+docker attach $(docker ps --format '{{.Names}}' | grep -i "worldserver\|mangosd" | head -1)
 ```
 
-You will see server output. That means it worked!
-
----
-
-### Step 17 — Create Your Account
-
-Type these commands — replace USERNAME and PASSWORD
-with whatever you want:
+You will see server output scrolling. Type your commands:
 
 ```
 account create USERNAME PASSWORD PASSWORD
@@ -300,62 +305,96 @@ account create dad mypassword mypassword
 account set gmlevel dad 3 -1
 ```
 
----
+Exit the console with **Ctrl+P** then **Ctrl+Q**.
 
-### Step 18 — Exit the Console Safely
-
-Press **Ctrl+P** then immediately **Ctrl+Q**
-
-> ⚠️  Never press Ctrl+C — that stops the server!
+> ⚠️ Never press Ctrl+C in the console — that stops the server!
 
 ---
 
-## 🎮 PART 5 — Connect WoW to Your Server
+## 🌐 PART 5 — Connect Your WoW Client to the Server
 
-This is the key difference from the Steam Deck guide.
-Your WoW client is on Windows, your server is in WSL2.
+This is the most important difference from the Steam Deck guide. Your WoW client is on Windows; your server is in WSL2. They are not on the same `localhost`.
 
-### Step 19 — Find Your WSL2 IP Address
+### Which method works for you?
 
-In the Ubuntu terminal run:
+**Check your WSL2 version:**
+```powershell
+wsl --version
+```
+
+| Your setup | What to use |
+|------------|-------------|
+| Windows 11 22H2 or later | Use the [Mirrored Networking](#option-c--mirrored-networking-windows-11-22h2-recommended) method — `127.0.0.1` works |
+| Windows 10 or Windows 11 older | Use the [WSL2 IP method](#option-a--wsl2-ip-address-always-works) |
+
+---
+
+### Option A — WSL2 IP Address (always works)
+
+In the Ubuntu terminal, run:
 
 ```bash
 hostname -I | awk '{print $1}'
 ```
 
-This will print an IP address like `172.24.144.1`.
-**Write this down** — you need it in the next step.
+This prints an IP like `172.24.144.1`. Use that IP in your `realmlist.wtf`.
 
-> ⚠️  This IP address can change every time you restart
-> WSL2. You will need to check it each session if it
-> stops working. See the FAQ below for how to fix this.
-
----
-
-### Step 20 — Update Your WoW Realmlist
-
-On your **Windows PC** (not in Ubuntu), find your
-WoW 3.3.5a client folder and open `realmlist.wtf`
-in Notepad.
-
-Change it to use your WSL2 IP address:
+On your **Windows PC**, find your WoW client folder and open `realmlist.wtf` in Notepad. Change it to:
 
 ```
 set realmlist 172.24.144.1
 ```
 
-Replace `172.24.144.1` with the IP you got in Step 19.
-
-Save and close the file.
+> ⚠️ This IP can change every time WSL2 restarts. Check it each session if the connection stops working. See the FAQ for a workaround.
 
 ---
 
-### Step 21 — Launch WoW and Log In
+### Option B — localhost forwarding (recent WSL2, easy check)
+
+If your WSL2 was installed or updated recently (2023 or later), localhost forwarding may already be enabled by default. Try this first:
+
+Set your `realmlist.wtf` to:
+
+```
+set realmlist 127.0.0.1
+```
+
+Launch WoW and try to connect. If it works — you're done, use this going forward. If not, use Option A or C.
+
+---
+
+### Option C — Mirrored Networking (Windows 11 22H2+, recommended)
+
+This makes WSL2 share the same network as Windows, so `127.0.0.1` always works and never changes.
+
+On your **Windows PC** (not in Ubuntu), open Notepad and save this as `C:\Users\YourName\.wslconfig`:
+
+```ini
+[wsl2]
+memory=6GB
+networkingMode=mirrored
+```
+
+Then restart WSL2:
+```powershell
+wsl --shutdown
+```
+
+Reopen Ubuntu, start your server, and set your `realmlist.wtf` to:
+
+```
+set realmlist 127.0.0.1
+```
+
+This is now permanent — the realmlist never needs updating again.
+
+---
+
+### Step 15 — Launch WoW and Log In
 
 Launch WoW from your Windows desktop as normal.
 
-Log in with the username and password you created
-in Step 17.
+Log in with `admin` / `admin` (or the account you created in Part 4).
 
 **You should be in Azeroth! ⚔️**
 
@@ -363,66 +402,131 @@ in Step 17.
 
 ## 🖥️ PART 6 — Starting and Stopping Your Server
 
-Unlike the Steam Deck, there is no Gaming Mode launcher
-on Windows. Here is how to manage your server manually.
+Unlike the Steam Deck, there is no Gaming Mode launcher on Windows. Here is how to manage your server.
 
 ### Starting Your Server
 
-Open the Ubuntu terminal and run:
+Open the Ubuntu terminal and run the command for your game:
 
 ```bash
-# Base WoW
-cd ~/wow-server && docker compose up -d
-
-# NPCBots
-cd ~/wow-server-npcbots && docker compose up -d
-
-# Playerbots
+# WoW WotLK
 cd ~/wow-server-playerbots && docker compose up -d
+
+# WoW TBC
+cd ~/wow-tbc-server && docker compose up -d
+
+# WoW Vanilla
+cd ~/wow-vanilla-server && docker compose up -d
 ```
 
-Wait for the server to be ready — watch with:
+Watch the server start:
 
 ```bash
-docker logs -f $(docker ps --format '{{.Names}}' | grep worldserver | head -1)
+docker logs -f $(docker ps --format '{{.Names}}' | grep -i "worldserver\|mangosd" | head -1)
 ```
 
-When you see `ready...` in the logs, launch WoW.
-Press Ctrl+C to stop watching the logs — the server
-keeps running.
+When you see `ready...` in the logs, launch WoW. Press **Ctrl+C** to stop watching — the server keeps running.
 
 ---
 
 ### Stopping Your Server
 
-Always stop the server properly before closing Ubuntu
-or shutting down your PC:
+Always stop the server before closing Ubuntu or shutting down your PC:
 
 ```bash
-# Base WoW
-cd ~/wow-server && docker compose down
-
-# NPCBots
-cd ~/wow-server-npcbots && docker compose down
-
-# Playerbots
+# WoW WotLK
 cd ~/wow-server-playerbots && docker compose down
+
+# WoW TBC
+cd ~/wow-tbc-server && docker compose down
+
+# WoW Vanilla
+cd ~/wow-vanilla-server && docker compose down
 ```
 
-> ⚠️  Never just close the Ubuntu window while the
-> server is running. Always run docker compose down first
-> to save your character data properly.
+> ⚠️ Never just close the Ubuntu window while the server is running. Always run `docker compose down` first to save character data properly.
 
 ---
 
-### Check if Server is Running
+### Check Server Status
 
 ```bash
 docker ps
 ```
 
-If you see containers listed — server is running.
-If the table is empty — server is stopped.
+Containers listed = server is running. Empty table = server is stopped.
+
+---
+
+## 🏃 PART 7 — RuneScape 2009 on WSL2
+
+RuneScape uses Java instead of Docker, which makes things slightly different on WSL2.
+
+### Install the Server
+
+Download and run the installer:
+
+```bash
+cd ~ && curl -O https://raw.githubusercontent.com/DadsMmoLab/dads-mmo-lab/main/guides/runescape/install-runescape.sh
+chmod +x install-runescape.sh
+./install-runescape.sh
+```
+
+The installer handles Java 11, the bundled MySQL, and the server setup automatically.
+
+---
+
+### Connect Your Client
+
+RuneScape's server listens on port **43594**. Your client (on Windows) needs to point at the WSL2 IP or `127.0.0.1`.
+
+The 2009scape project has a **Windows client** — use that instead of the Linux `client.jar`:
+
+1. Download the 2009scape client for Windows from [2009scape.org](https://2009scape.org)
+2. In the client's settings, set the server IP to your WSL2 IP (from `hostname -I | awk '{print $1}'`)
+3. Or use `127.0.0.1` if you've set up mirrored networking (Option C above)
+
+---
+
+### Starting and Stopping RuneScape
+
+RuneScape does not use Docker — it runs as a native Java process in WSL2.
+
+**Start:**
+```bash
+cd ~/runescape-server
+export LD_LIBRARY_PATH="$HOME/runescape-server/database/lib"
+# Start the bundled MySQL
+database/bin/mysqld --console --skip-grant-tables \
+    --lc-messages-dir="./share/" --datadir="./data" &
+sleep 5
+# Start management server and game server
+/usr/lib/jvm/java-11-openjdk/bin/java -jar ms.jar &
+/usr/lib/jvm/java-11-openjdk/bin/java -jar server.jar &
+```
+
+**Stop:**
+```bash
+pkill -f "runescape-server/server.jar"
+pkill -f "runescape-server/ms.jar"
+pkill -f "runescape-server/database/bin/mysqld"
+```
+
+> The Steam Deck launchers (`runescape-launcher.sh`) can also be run directly in WSL2 — they handle all of this automatically.
+
+---
+
+### Using the Linux Client on Windows 11 (WSLg)
+
+Windows 11 includes **WSLg** — a built-in display server that lets Linux GUI apps open as Windows. If you are on Windows 11 (build 22000 or later), you can run the Linux `client.jar` directly:
+
+```bash
+/usr/lib/jvm/java-11-openjdk/bin/java -jar ~/runescape-server/client.jar
+```
+
+A Java window will open on your Windows desktop — no additional setup required.
+
+> On Windows 10, WSLg is not available. Use the Windows native 2009scape client instead.
 
 ---
 
@@ -432,120 +536,120 @@ If the table is empty — server is stopped.
 
 **The WSL2 IP address keeps changing. How do I fix this?**
 
-This is a known WSL2 limitation. Every time WSL2 restarts
-it may get a new IP address. There are two solutions:
+Two options:
 
-**Option A — Check the IP each session (easiest):**
-Run `hostname -I | awk '{print $1}'` in Ubuntu before
-playing and update your realmlist.wtf if it changed.
+**Option 1 — Mirrored networking** (Windows 11 22H2+ only): Set `networkingMode=mirrored` in `.wslconfig`. After that, use `127.0.0.1` forever — it never changes. See Part 5.
 
-**Option B — Use a fixed IP (advanced):**
-Add this to your Windows hosts file
-(`C:\Windows\System32\drivers\etc\hosts`):
+**Option 2 — Hosts file trick** (Windows 10 or older Windows 11): Add this to `C:\Windows\System32\drivers\etc\hosts`:
 ```
 172.24.144.1    wowserver.local
 ```
-Then set your realmlist to `set realmlist wowserver.local`.
-You still need to update the IP in the hosts file when
-it changes, but at least your realmlist never changes.
+Set your realmlist to `set realmlist wowserver.local`. When the IP changes, update only the hosts file — your realmlist stays the same.
 
 ---
 
-**Can I use 127.0.0.1 like on the Steam Deck?**
+**Can I use 127.0.0.1 directly?**
 
-Unfortunately not. On WSL2, `127.0.0.1` refers to
-Windows itself, not the Linux environment. You must
-use the WSL2 IP address from `hostname -I`.
+**Windows 11 22H2+ with mirrored networking:** Yes, always.
+
+**Recent WSL2 on Windows 10 or older Windows 11:** Sometimes — try it and see. If it works, use it. If not, use the WSL2 IP.
 
 ---
 
 **Docker stops working after I restart my PC**
 
-WSL2 suspends when you restart. Open Ubuntu and run:
+WSL2 suspends when Windows restarts. Open Ubuntu and run:
 
 ```bash
 sudo service docker start
 ```
 
-If you completed Step 12, this should happen automatically
-when you open Ubuntu.
+If you completed Step 11, this should happen automatically when you open Ubuntu. If not, re-run:
+
+```bash
+echo 'sudo service docker start > /dev/null 2>&1' >> ~/.bashrc
+```
 
 ---
 
 **The server starts but WoW says "unable to connect"**
 
-Check two things:
+Check three things in order:
 
-1. Is the server actually ready?
+1. **Is the server ready?**
 ```bash
-docker logs $(docker ps --format '{{.Names}}' | grep worldserver | head -1) | tail -20
+docker logs $(docker ps --format '{{.Names}}' | grep -i "worldserver\|mangosd" | head -1) | tail -20
 ```
 Look for `ready...` near the bottom.
 
-2. Is your realmlist pointing to the right IP?
+2. **Is your IP right?**
 ```bash
 hostname -I | awk '{print $1}'
 ```
-Compare this to what is in your `realmlist.wtf`. They must match.
+Compare this to what is in your `realmlist.wtf`. They must match exactly.
+
+3. **Is Docker even running?**
+```bash
+docker ps
+```
+If this fails, run `sudo service docker start` and try again.
 
 ---
 
 **Windows Firewall is blocking the connection**
 
-If WoW cannot connect and you have confirmed the IP
-and realmlist are correct, Windows Firewall may be
-blocking the ports.
+If the IP and realmlist are correct but WoW still can't connect, Windows Firewall may be blocking the ports.
 
-Open **Windows Defender Firewall** → **Allow an app
-through firewall** → check if Ubuntu or WSL is listed
-and allowed. If not, add it.
+Open **Windows Defender Firewall** → **Allow an app through firewall** → check if Ubuntu or WSL is listed and allowed. If not, add it manually.
+
+Alternatively, temporarily turn off the Windows Firewall to test — if WoW connects, firewall is the issue.
+
+---
+
+**WSL2 is using too much RAM / disk**
+
+Add a `.wslconfig` file at `C:\Users\YourName\.wslconfig` to cap RAM:
+
+```ini
+[wsl2]
+memory=4GB
+processors=2
+```
+
+Restart WSL2 with `wsl --shutdown` in PowerShell for it to take effect.
 
 ---
 
 **Can I run this on Windows 10?**
 
-Yes! You need Windows 10 version 2004 (build 19041)
-or later. Press **Win+R**, type `winver` to check.
-If you are on an older version, run Windows Update first.
+Yes. You need Windows 10 version 2004 (build 19041) or later. Press **Win+R**, type `winver` to check. If you are on an older version, run Windows Update first.
+
+Note: Windows 10 does not support mirrored networking or WSLg (GUI apps). Use the WSL2 IP method for the realmlist, and use Windows native clients for games.
 
 ---
 
 **Does this work on a laptop?**
 
-Yes! Any Windows laptop made in the last 8 years should
-work fine for Base WoW and NPCBots. Playerbots compilation
-takes longer on older hardware but will still work.
-Keep your laptop plugged in during compilation.
+Yes! Any Windows laptop made in the last 8 years works fine. Keep your laptop plugged in during any compilation step — the Playerbots installer compiles C++ source and takes 2–4 hours on older machines.
 
 ---
 
-**Can I have multiple server versions installed?**
+**Can I have multiple game servers installed?**
 
-Yes! Same as the Steam Deck — each installs to its
-own folder and they never conflict. Just run one at a time.
+Yes! Each installs to its own folder and they never conflict. Just run one at a time.
 
 ```
-~/wow-server           Base WoW
-~/wow-server-npcbots   NPCBots
-~/wow-server-playerbots Playerbots
+~/wow-server-playerbots    WoW WotLK
+~/wow-tbc-server           WoW TBC
+~/wow-vanilla-server       WoW Vanilla
+~/runescape-server         RuneScape 2009
 ```
 
 ---
 
-## 🔧 Keeping Docker Running Between Sessions
+**Do I need to re-run the installer after a Windows Update?**
 
-Every time you open Ubuntu you may need to start Docker:
-
-```bash
-sudo service docker start
-```
-
-If you completed Step 12 this is automatic. If you ever
-need to redo it:
-
-```bash
-echo 'sudo service docker start > /dev/null 2>&1' >> ~/.bashrc
-```
+No — your Ubuntu environment and game server files survive Windows updates. WSL2 itself may update, but your data inside it is not affected.
 
 ---
 
@@ -563,19 +667,24 @@ sudo service docker start
 hostname -I | awk '{print $1}'
 ```
 
-**Start server:**
+**Start WoW server:**
 ```bash
-cd ~/wow-server && docker compose up -d
+# WotLK
+cd ~/wow-server-playerbots && docker compose up -d
+# TBC
+cd ~/wow-tbc-server && docker compose up -d
+# Vanilla
+cd ~/wow-vanilla-server && docker compose up -d
 ```
 
 **Watch server start:**
 ```bash
-docker logs -f $(docker ps --format '{{.Names}}' | grep worldserver | head -1)
+docker logs -f $(docker ps --format '{{.Names}}' | grep -i "worldserver\|mangosd" | head -1)
 ```
 
-**Stop server:**
+**Stop WoW server:**
 ```bash
-cd ~/wow-server && docker compose down
+cd ~/wow-server-playerbots && docker compose down
 ```
 
 **Check server status:**
@@ -585,34 +694,26 @@ docker ps
 
 **Open GM console:**
 ```bash
-docker attach $(docker ps --format '{{.Names}}' | grep worldserver | head -1)
+docker attach $(docker ps --format '{{.Names}}' | grep -i "worldserver\|mangosd" | head -1)
 ```
-Exit with Ctrl+P then Ctrl+Q
+Exit with **Ctrl+P** then **Ctrl+Q**
+
+**Restart WSL2 (from PowerShell):**
+```powershell
+wsl --shutdown
+```
 
 ---
 
-## What is Next?
+## 🗺️ What's Next?
 
-- Need to create more accounts? See HOWTO-CREATE-ACCOUNTS.md
-- Need to manage your server? See HOWTO-DESKTOP-CONTROLS-1.md
-- Want to set up the AH Bot? See HOWTO-SETUP-AHBOT.md
-
----
-
-## Video Guide
-
-Full video walkthroughs at:
-**youtube.com/@DadsMmoLab**
-
-## GitHub
-
-Everything is free at:
-**github.com/DadsMmoLab/dads-mmo-lab**
+- **Need to create more accounts?** See `HOWTO-CREATE-ACCOUNTS.md` in the guides folder
+- **Want the full game list?** Everything is at [github.com/DadsMmoLab/dads-mmo-lab](https://github.com/DadsMmoLab/dads-mmo-lab)
+- **Video walkthroughs:** [youtube.com/@DadsMmoLab](https://youtube.com/@DadsMmoLab)
 
 ---
 
-*Part of the Dad's MMO Lab project — offline MMO servers,
-free forever. No Steam Deck required.*
+*Part of the Dad's MMO Lab project — offline MMO servers, free forever. No Steam Deck required.*
 
 **youtube.com/@DadsMmoLab**
 **github.com/DadsMmoLab/dads-mmo-lab**
