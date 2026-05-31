@@ -52,6 +52,9 @@ GOLD='\033[38;5;220m'; DIM='\033[2m'
 #   Row  15+  : menu content
 MENU_START_ROW=15
 MENU_INPUT_ROW=24
+_TERM_LINES=24
+_TERM_COLS=80
+_RESIZE_NEEDED=false
 ANIM_PID=""
 _IN_ALT_SCREEN=false
 
@@ -107,15 +110,35 @@ stop_logo_animation() {
     fi
 }
 
+_get_term_size() {
+    _TERM_LINES=$(tput lines 2>/dev/null || echo 24)
+    _TERM_COLS=$(tput cols  2>/dev/null || echo 80)
+}
+
+# Lightweight SIGWINCH handler — keeps the trap body minimal to avoid
+# interleaved output while other code may be printing.
+# Full logo/header redraw is deferred to the next menu loop iteration.
+_handle_resize() {
+    _RESIZE_NEEDED=true
+    _get_term_size
+    if [ "${_TERM_COLS:-80}" -ge 80 ]; then
+        MENU_START_ROW=15
+    else
+        MENU_START_ROW=6
+    fi
+    # Update scroll region immediately so new output stays below the header.
+    printf '\033[%d;%dr' "$MENU_START_ROW" "$_TERM_LINES" 2>/dev/null || true
+}
+
 # Read a menu choice into global _MENU_INPUT.
 # Positions the cursor at the given row; backspace/delete work via the terminal's line editing.
 _MENU_INPUT=""
 _read_menu_input() {
-    local _input_row=${1:-$MENU_INPUT_ROW}
+    local _input_row=${1:-$(( ${_TERM_LINES:-24} - 1 ))}
     _MENU_INPUT=""
     printf '\033[%d;3H\033[K' "$_input_row"
     printf "${WHITE}Choice: ${RST}"
-    read -r _MENU_INPUT
+    read -r _MENU_INPUT || { [ -z "$_MENU_INPUT" ] && return 2; }
 }
 
 _screen_int_handler() {
@@ -129,20 +152,31 @@ _screen_int_handler() {
 # Draw the logo + subtitle bar statically (full clear + redraw).
 _draw_logo_static() {
     printf '\033[1;1H\033[J'
-    printf '\n'
-    printf '\033[2m%s\033[K\033[0m\n'       "$_LOGO_L0"
-    printf '\033[38;5;220m%s\033[K\033[0m\n' "$_LOGO_L1"
-    printf '\033[38;5;220m%s\033[K\033[0m\n' "$_LOGO_L2"
-    printf '\033[38;5;214m%s\033[K\033[0m\n' "$_LOGO_L3"
-    printf '\033[38;5;214m%s\033[K\033[0m\n' "$_LOGO_L4"
-    printf '\033[38;5;208m%s\033[K\033[0m\n' "$_LOGO_L5"
-    printf '\033[38;5;202m%s\033[K\033[0m\n' "$_LOGO_L6"
-    printf '\033[38;5;196m%s\033[K\033[0m\n' "$_LOGO_L7"
-    printf '\n'
-    printf '\033[38;5;220m ══════════════════════════════════════════════════════════════════════════════════\033[K\033[0m\n'
-    printf '   \033[2m⚔︎ WotLK Mod and Server Manager\033[0m  ✦  \033[2mv%s\033[0m\033[K\n' "$MANAGER_VERSION"
-    printf '\033[38;5;220m ══════════════════════════════════════════════════════════════════════════════════\033[K\033[0m\n'
-    printf '\n'
+    tput rmam 2>/dev/null || true  # disable line wrap — logo/bars truncate cleanly on narrow terminals
+    if [ "${_TERM_COLS:-80}" -ge 80 ]; then
+        printf '\n'
+        printf '\033[2m%s\033[K\033[0m\n'       "$_LOGO_L0"
+        printf '\033[38;5;220m%s\033[K\033[0m\n' "$_LOGO_L1"
+        printf '\033[38;5;220m%s\033[K\033[0m\n' "$_LOGO_L2"
+        printf '\033[38;5;214m%s\033[K\033[0m\n' "$_LOGO_L3"
+        printf '\033[38;5;214m%s\033[K\033[0m\n' "$_LOGO_L4"
+        printf '\033[38;5;208m%s\033[K\033[0m\n' "$_LOGO_L5"
+        printf '\033[38;5;202m%s\033[K\033[0m\n' "$_LOGO_L6"
+        printf '\033[38;5;196m%s\033[K\033[0m\n' "$_LOGO_L7"
+        printf '\n'
+        printf '\033[38;5;220m ══════════════════════════════════════════════════════════════════════════════════\033[K\033[0m\n'
+        printf '   \033[2m⚔︎ WotLK Mod and Server Manager\033[0m  ✦  \033[2mv%s\033[0m\033[K\n' "$MANAGER_VERSION"
+        printf '\033[38;5;220m ══════════════════════════════════════════════════════════════════════════════════\033[K\033[0m\n'
+        printf '\n'
+    else
+        # Compact header for narrow terminals (< 80 cols) — fits in 5 rows (MENU_START_ROW=6).
+        printf '\n'
+        printf '\033[38;5;220m ══ Dad'"'"'s MMO Lab ══\033[K\033[0m\n'
+        printf '   \033[2m⚔︎ WoW Mgr\033[0m  v%s\033[K\n' "$MANAGER_VERSION"
+        printf '\033[38;5;220m ═══════════════════\033[K\033[0m\n'
+        printf '\n'
+    fi
+    tput smam 2>/dev/null || true  # re-enable line wrap
 }
 
 # Enter alt screen buffer, set scroll region, draw static logo.
@@ -152,9 +186,13 @@ _setup_screen() {
         printf '\033[?1049h'
         _IN_ALT_SCREEN=true
     fi
-    local tlines
-    tlines=$(tput lines 2>/dev/null || echo 25)
-    printf '\033[%d;%dr' "$MENU_START_ROW" "$tlines"
+    _get_term_size
+    if [ "${_TERM_COLS:-80}" -ge 80 ]; then
+        MENU_START_ROW=15
+    else
+        MENU_START_ROW=6
+    fi
+    printf '\033[%d;%dr' "$MENU_START_ROW" "$_TERM_LINES"
     printf '\033[?25l'
     _draw_logo_static
     printf '\033[?25h'
@@ -164,8 +202,9 @@ _setup_screen() {
 # then freezes the logo statically for the rest of the session.
 start_logo_animation() {
     _setup_screen
-    trap 'printf "\033[r\033[?1049l\033[?25h"' EXIT
+    trap 'tput smam 2>/dev/null || true; printf "\033[r\033[?1049l\033[?25h"' EXIT
     trap '_screen_int_handler' INT TERM
+    trap '_handle_resize' WINCH
 
     # Start animation subprocess
     _logo_anim_loop \
@@ -192,7 +231,9 @@ start_logo_animation() {
 with_full_screen() {
     printf '\033[r\033[H\033[2J\033[?25h'
     _ALLOW_INT_EXIT=false
+    trap '' WINCH  # suppress resize redraws while a full-screen child is running
     "$@"
+    trap '_handle_resize' WINCH
     _ALLOW_INT_EXIT=true
     _setup_screen
     printf '\033[%d;1H\033[J' "$MENU_START_ROW"
@@ -4294,7 +4335,11 @@ show_about() {
 menu_ale_scripts() {
     local page_start=0
     while true; do
-        local tlines; tlines=$(tput lines 2>/dev/null || echo 24)
+        if [ "$_RESIZE_NEEDED" = true ]; then
+            _RESIZE_NEEDED=false
+            _setup_screen
+        fi
+        local tlines; tlines=$_TERM_LINES
 
         # Clear menu area
         printf '\033[%d;1H\033[J' "$MENU_START_ROW"
@@ -4364,9 +4409,11 @@ menu_ale_scripts() {
             [ "$current_page" -lt "$total_pages" ]  && nav+="   ${WHITE}> next${RST}"
             printf "%b\n" "$nav"
         fi
-        printf "  ${WHITE}i<nums>${RST} Install   ${WHITE}r<num>${RST} Remove   ${WHITE}c<num>${RST} Config   ${WHITE}?<num>${RST} About   ${WHITE}ENTER${RST} Back\n"
+        local page_hint=""
+        [ "$total_pages" -gt 1 ] && page_hint="   ${WHITE}< >${RST} Page"
+        printf "  ${WHITE}i<nums>${RST} Install   ${WHITE}r<num>${RST} Remove   ${WHITE}c<num>${RST} Config   ${WHITE}?<num>${RST} About${page_hint}   ${WHITE}ENTER${RST} Back\n"
 
-        _read_menu_input "$(( tlines - 1 ))"
+        _read_menu_input "$(( tlines - 1 ))" || continue
         local raw_choice="$_MENU_INPUT"
 
         [ -z "$raw_choice" ] && return
@@ -4471,7 +4518,11 @@ menu_ale_scripts() {
 menu_modules() {
     local page_start=0
     while true; do
-        local tlines; tlines=$(tput lines 2>/dev/null || echo 24)
+        if [ "$_RESIZE_NEEDED" = true ]; then
+            _RESIZE_NEEDED=false
+            _setup_screen
+        fi
+        local tlines; tlines=$_TERM_LINES
 
         # Build full registry list (always done fresh for current status)
         local -a available_entries=()
@@ -4566,9 +4617,11 @@ menu_modules() {
             [ "$current_page" -lt "$total_pages" ]  && nav+="   ${WHITE}> next${RST}"
             printf "%b\n" "$nav"
         fi
-        printf "  ${WHITE}i <nums>${RST} Install   ${WHITE}r <num>${RST} Remove   ${WHITE}c <num>${RST} Config   ${WHITE}?<num>${RST} About   ${WHITE}ENTER${RST} Back\n"
+        local page_hint=""
+        [ "$total_pages" -gt 1 ] && page_hint="   ${WHITE}< >${RST} Page"
+        printf "  ${WHITE}i <nums>${RST} Install   ${WHITE}r <num>${RST} Remove   ${WHITE}c <num>${RST} Config   ${WHITE}?<num>${RST} About${page_hint}   ${WHITE}ENTER${RST} Back\n"
 
-        _read_menu_input "$(( tlines - 1 ))"
+        _read_menu_input "$(( tlines - 1 ))" || continue
         local raw_choice="$_MENU_INPUT"
 
         [ -z "$raw_choice" ] && return
@@ -4950,7 +5003,11 @@ _module_conf_hints() {
 menu_module_management() {
     local page_start=0
     while true; do
-        local tlines; tlines=$(tput lines 2>/dev/null || echo 24)
+        if [ "$_RESIZE_NEEDED" = true ]; then
+            _RESIZE_NEEDED=false
+            _setup_screen
+        fi
+        local tlines; tlines=$_TERM_LINES
         printf '\033[%d;1H\033[J' "$MENU_START_ROW"
 
         local -a available_entries=()
@@ -4990,9 +5047,11 @@ menu_module_management() {
             [ "$current_page" -lt "$total_pages" ] && nav+="   ${WHITE}> next${RST}"
             printf "%b\n" "$nav"
         fi
-        printf "  ${WHITE}a<num>${RST} Activate conf   ${WHITE}e<num>${RST} Edit conf   ${WHITE}r<num>${RST} Reset defaults   ${WHITE}?<num>${RST} Help   ${WHITE}ENTER${RST} Back\n"
+        local page_hint=""
+        [ "$total_pages" -gt 1 ] && page_hint="   ${WHITE}< >${RST} Page"
+        printf "  ${WHITE}a<num>${RST} Activate conf   ${WHITE}e<num>${RST} Edit conf   ${WHITE}r<num>${RST} Reset defaults   ${WHITE}?<num>${RST} Help${page_hint}   ${WHITE}ENTER${RST} Back\n"
 
-        _read_menu_input "$(( tlines - 1 ))"
+        _read_menu_input "$(( tlines - 1 ))" || continue
         local raw_choice="$_MENU_INPUT"
         [ -z "$raw_choice" ] && return
 
@@ -5239,7 +5298,11 @@ menu_sql_mods() {
     sqlmod_init
     local page_start=0
     while true; do
-        local tlines; tlines=$(tput lines 2>/dev/null || echo 24)
+        if [ "$_RESIZE_NEEDED" = true ]; then
+            _RESIZE_NEEDED=false
+            _setup_screen
+        fi
+        local tlines; tlines=$_TERM_LINES
         printf '\033[%d;1H\033[J' "$MENU_START_ROW"
 
         local -a available_entries=()
@@ -5289,9 +5352,11 @@ menu_sql_mods() {
             [ "$current_page" -lt "$total_pages" ]  && nav+="   ${WHITE}> next${RST}"
             printf "%b\n" "$nav"
         fi
-        printf "  ${WHITE}i<num>${RST} Install   ${WHITE}r<num>${RST} Remove   ${WHITE}c<num>${RST} Config   ${WHITE}?<num>${RST} About   ${WHITE}ENTER${RST} Back\n"
+        local page_hint=""
+        [ "$total_pages" -gt 1 ] && page_hint="   ${WHITE}< >${RST} Page"
+        printf "  ${WHITE}i<num>${RST} Install   ${WHITE}r<num>${RST} Remove   ${WHITE}c<num>${RST} Config   ${WHITE}?<num>${RST} About${page_hint}   ${WHITE}ENTER${RST} Back\n"
 
-        _read_menu_input "$(( tlines - 1 ))"
+        _read_menu_input "$(( tlines - 1 ))" || continue
         local raw_choice="$_MENU_INPUT"
         [ -z "$raw_choice" ] && return
 
@@ -5364,6 +5429,10 @@ menu_sql_mods() {
 # ── Server Maintenance submenu ───────────────────────────────
 menu_server_maintenance() {
     while true; do
+        if [ "$_RESIZE_NEEDED" = true ]; then
+            _RESIZE_NEEDED=false
+            _setup_screen
+        fi
         printf '\033[%d;1H\033[J' "$MENU_START_ROW"
         printf "  ${GOLD}${BOLD}Server Maintenance${RST}\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
@@ -5373,8 +5442,8 @@ menu_server_maintenance() {
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${DIM}  [ENTER] Back${RST}\n"
 
-        local _tlines; _tlines=$(tput lines 2>/dev/null || echo 24)
-        _read_menu_input "$(( _tlines - 1 ))"
+        local _tlines; _tlines=$_TERM_LINES
+        _read_menu_input "$(( _tlines - 1 ))" || continue
         local choice="${_MENU_INPUT,,}"
 
         case "$choice" in
@@ -5515,6 +5584,10 @@ _maintenance_import() {
 
 main_menu() {
     while true; do
+        if [ "$_RESIZE_NEEDED" = true ]; then
+            _RESIZE_NEEDED=false
+            _setup_screen
+        fi
         refresh_container_names
         local state_str build_str
         if container_running "$WORLD_CONTAINER"; then
@@ -5556,9 +5629,9 @@ main_menu() {
         printf "  ${GOLD} Q)${RST} Quit\n"
 
         # Input at second-to-last terminal row so it's always visible
-        local _tlines; _tlines=$(tput lines 2>/dev/null || echo 24)
+        local _tlines; _tlines=$_TERM_LINES
         local _irow=$(( _tlines - 1 ))
-        _read_menu_input "$_irow"
+        _read_menu_input "$_irow" || continue
         local choice="${_MENU_INPUT,,}"
 
         case "$choice" in
@@ -5581,10 +5654,6 @@ main_menu() {
         esac
     done
 }
-
-# ─────────────────────────────────────────────────────────────
-# ENTRYPOINT
-# ─────────────────────────────────────────────────────────────
 
 # Scan all three mod registries and silently populate ingame-commands.txt
 # for any mods already installed. Handles upgrades from older manager versions
@@ -5621,6 +5690,11 @@ sync_ingame_commands_for_installed() {
     [ "$count" -gt 0 ] && \
         print_info "📋 In-game commands reference synced for $count installed mod(s): $INGAME_COMMANDS_FILE"
 }
+
+# ─────────────────────────────────────────────────────────────
+# ENTRYPOINT
+# ─────────────────────────────────────────────────────────────
+
 
 start_logo_animation
 detect_install
