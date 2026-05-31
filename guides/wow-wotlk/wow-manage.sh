@@ -244,15 +244,19 @@ DB_ROOT_PASSWORD="password"   # acore-docker default
 
 # Module registry: key|name|repo url|sql dirs (comma-sep)
 declare -a MODULE_REGISTRY=(
-    "mod-ah-bot|Auction House Bot|https://github.com/azerothcore/mod-ah-bot.git|world"
-    "mod-solocraft|Solocraft (solo dungeon/raid scaling)|https://github.com/azerothcore/mod-solocraft.git|world"
-    "mod-aoe-loot|AoE Loot|https://github.com/azerothcore/mod-aoe-loot.git|world"
-    "mod-learn-spells|Learn Spells on Levelup|https://github.com/azerothcore/mod-learn-spells.git|world"
-    "mod-individual-progression|Individual Progression (Vanilla → TBC → WotLK)|https://github.com/ZhengPeiRu21/mod-individual-progression.git|world,characters"
-    "mod-autobalance|Auto Balance (dynamic difficulty)|https://github.com/azerothcore/mod-autobalance.git|world"
-    "mod-transmog|Transmogrification|https://github.com/azerothcore/mod-transmog.git|world,characters"
     "mod-1v1-arena|1v1 Arena|https://github.com/azerothcore/mod-1v1-arena.git|characters"
+    "mod-aoe-loot|AoE Loot|https://github.com/azerothcore/mod-aoe-loot.git|world"
+    "mod-ah-bot|Auction House Bot|https://github.com/azerothcore/mod-ah-bot.git|world"
+    "mod-autobalance|Auto Balance (dynamic difficulty)|https://github.com/azerothcore/mod-autobalance.git|world"
     "mod-ale|AzerothCore Lua Engine (ALE)|https://github.com/azerothcore/mod-ale.git|"
+    "mod-player-bot-level-brackets|Bot Level Brackets (Playerbot distribution)|https://github.com/DustinHendrickson/mod-player-bot-level-brackets.git|world,characters"
+    "mod-challenge-modes|Challenge Modes (Hardcore, Iron Man, etc.)|https://github.com/ZhengPeiRu21/mod-challenge-modes.git|world,characters"
+    "mod-individual-progression|Individual Progression (Vanilla → TBC → WotLK)|https://github.com/ZhengPeiRu21/mod-individual-progression.git|world,characters"
+    "mod-junk-to-gold|Junk to Gold (auto-sell gray items)|https://github.com/noisiver/mod-junk-to-gold.git|world"
+    "mod-learn-spells|Learn Spells on Levelup|https://github.com/azerothcore/mod-learn-spells.git|world"
+    "mod-npc-beastmaster|NPC Beastmaster (pets for all classes)|https://github.com/azerothcore/mod-npc-beastmaster.git|world,characters"
+    "mod-solocraft|Solocraft (solo dungeon/raid scaling)|https://github.com/azerothcore/mod-solocraft.git|world"
+    "mod-transmog|Transmogrification|https://github.com/azerothcore/mod-transmog.git|world,characters"
 )
 
 # ─────────────────────────────────────────────────────────────
@@ -1331,6 +1335,120 @@ configure_ale() {
     print_info "Place your Lua scripts in:"
     print_info "  $lua_scripts_dir"
     print_info "Restart the worldserver for changes to take effect."
+}
+
+# ─────────────────────────────────────────────────────────────
+# configure_module_challenge_modes
+#   Copies challenge_modes.conf.dist → challenge_modes.conf and opens
+#   it in the editor.  Also reminds user about EnablePlayerSettings.
+#   Note: if no conf.dist is present, a worldserver rebuild is needed
+#   first so the build system produces the conf files.
+# ─────────────────────────────────────────────────────────────
+configure_module_challenge_modes() {
+    print_step "Configuring Challenge Modes"
+
+    local module_dir="$SERVER_DIR/modules/mod-challenge-modes"
+    if [ ! -d "$module_dir" ]; then
+        print_error "Challenge Modes module not installed (expected at $module_dir)."
+        return 1
+    fi
+
+    local conf_dist="$module_dir/conf/challenge_modes.conf.dist"
+    local conf_dest="$SERVER_DIR/env/dist/etc/modules/challenge_modes.conf"
+    mkdir -p "$SERVER_DIR/env/dist/etc/modules"
+
+    if [ ! -f "$conf_dest" ]; then
+        if [ -f "$conf_dist" ]; then
+            cp "$conf_dist" "$conf_dest"
+            print_success "Created $conf_dest"
+        else
+            print_warning "conf.dist not found at $conf_dist"
+            print_info "The worldserver must be rebuilt once before conf files are generated."
+            print_info "After rebuilding, re-run this configure option."
+            return 0
+        fi
+    fi
+
+    print_info "⚠  Challenge Modes requires  EnablePlayerSettings = 1  in worldserver.conf."
+    echo ""
+    ${EDITOR:-nano} "$conf_dest"
+    echo ""
+    print_info "Restart the worldserver for conf changes to take effect."
+}
+
+# ─────────────────────────────────────────────────────────────
+# configure_module_bot_level_brackets
+#   Copies mod_player_bot_level_brackets.conf.dist and opens it.
+#   Reminds user that the Playerbots module is required.
+# ─────────────────────────────────────────────────────────────
+configure_module_bot_level_brackets() {
+    print_step "Configuring Bot Level Brackets"
+
+    local module_dir="$SERVER_DIR/modules/mod-player-bot-level-brackets"
+    if [ ! -d "$module_dir" ]; then
+        print_error "Bot Level Brackets module not installed (expected at $module_dir)."
+        return 1
+    fi
+
+    local conf_dist="$module_dir/conf/mod_player_bot_level_brackets.conf.dist"
+    local conf_dest="$SERVER_DIR/env/dist/etc/modules/mod_player_bot_level_brackets.conf"
+    mkdir -p "$SERVER_DIR/env/dist/etc/modules"
+
+    if [ ! -f "$conf_dest" ]; then
+        if [ -f "$conf_dist" ]; then
+            cp "$conf_dist" "$conf_dest"
+            print_success "Created $conf_dest"
+        else
+            print_warning "conf.dist not found at $conf_dist"
+            print_info "The worldserver must be rebuilt once before conf files are generated."
+            print_info "After rebuilding, re-run this configure option."
+            return 0
+        fi
+    fi
+
+    print_info "⚠  Bot Level Brackets requires the Playerbots module to function."
+    echo ""
+    ${EDITOR:-nano} "$conf_dest"
+    echo ""
+    print_info "Restart the worldserver for conf changes to take effect."
+}
+
+# ─────────────────────────────────────────────────────────────
+# configure_module_npc_beastmaster
+#   Copies mod_npc_beastmaster.conf.dist and opens it.
+#   Reminds user about the Creatures.CustomIDs worldserver.conf tip.
+# ─────────────────────────────────────────────────────────────
+configure_module_npc_beastmaster() {
+    print_step "Configuring NPC Beastmaster"
+
+    local module_dir="$SERVER_DIR/modules/mod-npc-beastmaster"
+    if [ ! -d "$module_dir" ]; then
+        print_error "NPC Beastmaster module not installed (expected at $module_dir)."
+        return 1
+    fi
+
+    local conf_dist="$module_dir/conf/mod_npc_beastmaster.conf.dist"
+    local conf_dest="$SERVER_DIR/env/dist/etc/modules/mod_npc_beastmaster.conf"
+    mkdir -p "$SERVER_DIR/env/dist/etc/modules"
+
+    if [ ! -f "$conf_dest" ]; then
+        if [ -f "$conf_dist" ]; then
+            cp "$conf_dist" "$conf_dest"
+            print_success "Created $conf_dest"
+        else
+            print_warning "conf.dist not found at $conf_dist"
+            print_info "The worldserver must be rebuilt once before conf files are generated."
+            print_info "After rebuilding, re-run this configure option."
+            return 0
+        fi
+    fi
+
+    print_info "Tip: Add 601026 to Creatures.CustomIDs in worldserver.conf to suppress"
+    print_info "     a harmless gossip-menu warning in server logs."
+    echo ""
+    ${EDITOR:-nano} "$conf_dest"
+    echo ""
+    print_info "Restart the worldserver for conf changes to take effect."
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -3336,6 +3454,39 @@ _get_about_text() {
                 'interchangeable with standard Eluna scripts. Supports' \
                 'LuaJIT (recommended), Lua 5.2, 5.3, and 5.4.'
             ;;
+        mod-player-bot-level-brackets)
+            printf '%s\n' \
+                'Distributes Playerbot random bots across configurable level brackets' \
+                '(e.g. 12% in 1-9, 11% in 10-19) and auto-rebalances bots from' \
+                'overpopulated brackets to deficit ones. Supports dynamic distribution' \
+                'weighted by real player activity, guild/friend exclusions, and a Death' \
+                'Knight level safeguard (min 55). Full and lite debug logging included.' \
+                'Requires the Playerbots module and a worldserver rebuild.'
+            ;;
+        mod-challenge-modes)
+            printf '%s\n' \
+                'Adds opt-in per-character challenge modes selected at level 1 via a' \
+                'Shrine of Challenge NPC near each starting zone. Modes: Hardcore' \
+                '(permanent ghost on death), Semi-Hardcore (lose gear/gold on death),' \
+                'Self-Crafted, Item-Quality Level, Slow/Very Slow XP, Quest-XP Only,' \
+                'and Iron Man. Configurable rewards (items, titles, XP rate bonus).' \
+                'Requires EnablePlayerSettings = 1 in worldserver.conf.'
+            ;;
+        mod-junk-to-gold)
+            printf '%s\n' \
+                'Automatically sells gray (vendor-junk) items directly to vendor price' \
+                'when looted by the player, keeping bags free of clutter. No in-game' \
+                'toggle or configuration file required -- install, rebuild, and it works.'
+            ;;
+        mod-npc-beastmaster)
+            printf '%s\n' \
+                'Lets all classes (not just Hunters) adopt and use hunter pets via a' \
+                'special NPC. Provides pet adoption (normal, rare, exotic), Hunter' \
+                'skills for non-hunters, a pet food vendor, stables, and a tracked-pets' \
+                'system (summon, rename, delete). Players summon the NPC anywhere via' \
+                '.beastmaster. NPC entry: 601026 (White Fang). Add 601026 to' \
+                'Creatures.CustomIDs in worldserver.conf to silence a harmless warning.'
+            ;;
         accountwide)
             printf '%s\n' \
                 'Syncs achievements, currencies, gold, mounts, and pets across' \
@@ -3807,7 +3958,7 @@ menu_modules() {
             [ "$current_page" -lt "$total_pages" ]  && nav+="   ${WHITE}> next${RST}"
             printf "%b\n" "$nav"
         fi
-        printf "  ${WHITE}i <nums>${RST} Install   ${WHITE}r <num>${RST} Remove   ${WHITE}?<num>${RST} About   ${WHITE}ENTER${RST} Back\n"
+        printf "  ${WHITE}i <nums>${RST} Install   ${WHITE}r <num>${RST} Remove   ${WHITE}c <num>${RST} Config   ${WHITE}?<num>${RST} About   ${WHITE}ENTER${RST} Back\n"
 
         _read_menu_input "$(( tlines - 1 ))"
         local raw_choice="$_MENU_INPUT"
@@ -3863,7 +4014,10 @@ menu_modules() {
                     module_install "$key" "$name" "$url" "$sql_dirs" || true
                     echo ""
                 done
-                print_info "Modules cloned and SQL imported."
+                print_info "Modules cloned. SQL files will be applied automatically on next server start."
+                print_info "All C++ modules require a worldserver rebuild before they can load."
+                print_info "Conf files can be set up via 'Configure' — run configure after a rebuild if"
+                print_info "the conf.dist files are not yet present."
 
                 if [ "$SERVER_TYPE" = "playerbots" ]; then
                     print_info "Rebuild the worldserver to compile the new modules in."
@@ -3886,6 +4040,24 @@ menu_modules() {
                         echo ""
                         print_info "ALE requires post-install setup (lua_scripts dir + conf)."
                         if ask_yes_no "Configure ALE now?"; then configure_ale; fi
+                    fi
+                    if [ "$key" = "mod-challenge-modes" ]; then
+                        echo ""
+                        print_info "Challenge Modes has a conf file and requires EnablePlayerSettings = 1."
+                        print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
+                        if ask_yes_no "Configure Challenge Modes now?"; then configure_module_challenge_modes; fi
+                    fi
+                    if [ "$key" = "mod-player-bot-level-brackets" ]; then
+                        echo ""
+                        print_info "Bot Level Brackets requires the Playerbots module to function."
+                        print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
+                        if ask_yes_no "Configure Bot Level Brackets now?"; then configure_module_bot_level_brackets; fi
+                    fi
+                    if [ "$key" = "mod-npc-beastmaster" ]; then
+                        echo ""
+                        print_info "NPC Beastmaster has a conf file and SQL in db-world and db-characters."
+                        print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
+                        if ask_yes_no "Configure NPC Beastmaster now?"; then configure_module_npc_beastmaster; fi
                     fi
                 done
                 press_enter
@@ -3913,6 +4085,28 @@ menu_modules() {
                 fi
                 press_enter
                 ;;
+            c)
+                local cnum; cnum="${nums//[[:space:]]/}"
+                if ! [[ "$cnum" =~ ^[0-9]+$ ]] || \
+                   [ "$cnum" -lt 1 ] || [ "$cnum" -gt "$total" ]; then
+                    print_warning "Invalid module number — e.g. c3"
+                    press_enter; continue
+                fi
+                IFS='|' read -r key name _ _ <<< "${available_entries[$((cnum - 1))]}"
+                printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                case "$key" in
+                    mod-ah-bot)                  configure_ahbot ;;
+                    mod-ale)                     configure_ale ;;
+                    mod-challenge-modes)         configure_module_challenge_modes ;;
+                    mod-player-bot-level-brackets) configure_module_bot_level_brackets ;;
+                    mod-npc-beastmaster)         configure_module_npc_beastmaster ;;
+                    *)
+                        print_info "$name has no dedicated configure option."
+                        print_info "Edit its .conf file in $SERVER_DIR/env/dist/etc/modules/ directly."
+                        ;;
+                esac
+                press_enter
+                ;;
             [?])
                 local anum; anum="${nums//[[:space:]]/}"
                 if ! [[ "$anum" =~ ^[0-9]+$ ]] || \
@@ -3924,7 +4118,7 @@ menu_modules() {
                 show_about "$key" "$name" "$url"
                 ;;
             *)
-                print_warning "Unknown command. Use i <nums>, r <num>, ?<num>, or ENTER."
+                print_warning "Unknown command. Use i <nums>, r <num>, c <num>, ?<num>, or ENTER."
                 press_enter
                 ;;
         esac
@@ -3978,32 +4172,52 @@ show_first_run_welcome() {
         echo -e "${WHITE}You have ${BOLD}$user_module_count user-added module(s)${RST}${WHITE} already installed.${RST}"
     fi
     echo ""
+
+    echo -e "${WHITE}${BOLD}Three ways to modify your server:${RST}"
+    echo ""
+    echo -e "${GOLD}  1) AzerothCore Modules${RST}"
+    echo -e "${WHITE}     C++ plugins that rebuild into the worldserver binary. Add new${RST}"
+    echo -e "${WHITE}     features, mechanics, and systems. Require a ${BOLD}worldserver rebuild${RST}"
+    echo -e "${WHITE}     (30–90 min on Steam Deck) before they take effect.${RST}"
+    echo ""
+    echo -e "${GOLD}  2) ALE Lua Mods${RST}"
+    echo -e "${WHITE}     Lightweight Lua scripts that run inside the server at runtime —${RST}"
+    echo -e "${WHITE}     no rebuild needed after the first time. ${BOLD}Requires the AzerothCore${RST}"
+    echo -e "${WHITE}     ${BOLD}Lua Engine (ALE) module to be installed and configured first${RST}${WHITE}.${RST}"
+    echo -e "${WHITE}     Install ALE via option 1, then configure it via option 5.${RST}"
+    echo ""
+    echo -e "${GOLD}  3) SQL Mods${RST}"
+    echo -e "${WHITE}     Direct database tweaks: buff/nerf mobs, custom login messages,${RST}"
+    echo -e "${WHITE}     teleporters, rare drops, and more. Apply instantly — no rebuild.${RST}"
+    echo -e "${WHITE}     Databases are backed up automatically before each install.${RST}"
+    echo ""
+
     echo -e "${WHITE}${BOLD}A few things to know:${RST}"
     echo ""
     echo -e "${GREEN}  ✓${RST} ${WHITE}Nothing changes until you explicitly choose an action.${RST}"
-    echo -e "${WHITE}    Option 6 (Server status) and 10 (View logs) are read-only${RST}"
-    echo -e "${WHITE}    — safe to poke around and see what your install looks like.${RST}"
+    echo -e "${WHITE}    Options 7 (Server status) and 11 (View logs) are read-only.${RST}"
     echo ""
     echo -e "${GREEN}  ✓${RST} ${WHITE}You'll be asked before anything destructive.${RST}"
-    echo -e "${WHITE}    Adding/removing modules, rebuilding the worldserver, and${RST}"
-    echo -e "${WHITE}    the repair function all ask for confirmation first.${RST}"
+    echo -e "${WHITE}    Installs, removes, rebuilds, and database operations all ask first.${RST}"
     echo ""
-    echo -e "${GREEN}  ✓${RST} ${WHITE}Adding any module triggers a worldserver rebuild.${RST}"
-    echo -e "${WHITE}    On Steam Deck this takes 30-90 minutes. Plug in and${RST}"
-    echo -e "${WHITE}    keep the device on a flat surface for airflow.${RST}"
+    echo -e "${GREEN}  ✓${RST} ${WHITE}Option 13 → Server Maintenance has backup, restore, and repair tools.${RST}"
+    echo -e "${WHITE}    Repair only clears SQL update-tracking rows — it never drops tables.${RST}"
     echo ""
-    echo -e "${GREEN}  ✓${RST} ${WHITE}The repair function (option 13 → Server Maintenance) only clears SQL update${RST}"
-    echo -e "${WHITE}    tracking rows. It never drops database tables.${RST}"
-    echo ""
+
     if [ "$user_module_count" -eq 0 ]; then
         echo -e "${WHITE}${BOLD}Suggested first steps for a fresh install:${RST}"
-        echo -e "${WHITE}  1. Option ${CYAN}6${WHITE} (Server status) — see what containers are running${RST}"
-        echo -e "${WHITE}  2. Option ${CYAN}1${WHITE} (Modules) — browse and install modules${RST}"
+        echo -e "${WHITE}  1. Option ${CYAN}7${WHITE} (Server status) — confirm your containers are running${RST}"
+        echo -e "${WHITE}  2. Option ${CYAN}3${WHITE} (SQL Mods) — safe first tweaks, no rebuild needed${RST}"
+        echo -e "${WHITE}  3. Option ${CYAN}1${WHITE} (Modules) — browse and install C++ modules${RST}"
+        echo -e "${WHITE}  4. Option ${CYAN}5${WHITE} (Configure ALE) — if you installed the ALE module,${RST}"
+        echo -e "${WHITE}     configure it here, then use option ${CYAN}2${WHITE} to add Lua mods${RST}"
     else
         echo -e "${WHITE}${BOLD}Useful options for an existing install:${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}1${WHITE} (Modules) — browse installed and available modules${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}6${WHITE} (Server status) — check container state${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}12${WHITE} (Repair) — if ac-db-import is failing${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}1${WHITE} (Modules) — browse installed and available C++ modules${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}2${WHITE} (ALE Lua Mods) — manage Lua scripts (needs ALE installed)${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}3${WHITE} (SQL Mods) — database tweaks, no rebuild required${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}7${WHITE} (Server status) — check container state${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}13${WHITE} (Server Maintenance) — backup, restore, repair${RST}"
     fi
     echo ""
     echo -e "${DIM}This welcome shows once per install. The marker file at${RST}"
