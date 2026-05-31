@@ -26,7 +26,7 @@
 #  https://github.com/DadsMmoLab/dads-mmo-lab
 # ============================================================
 
-MANAGER_VERSION="2.0.0"
+MANAGER_VERSION="2.1.0 - ALE Drinker Edition"
 
 set -o pipefail
 
@@ -38,14 +38,169 @@ GOLD='\033[38;5;220m'; DIM='\033[2m'
 # ─────────────────────────────────────────────────────────────
 # UI HELPERS
 # ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# LOGO & SCREEN SETUP
+# ─────────────────────────────────────────────────────────────
+# Layout (1-indexed rows):
+#   Row  1    : blank
+#   Rows 2-9  : 8 logo lines  (animated during intro, static thereafter)
+#   Row  10   : blank
+#   Row  11   : separator bar
+#   Row  12   : "WoW Module Manager  ✦  vX.Y.Z"
+#   Row  13   : separator bar
+#   Row  14   : blank
+#   Row  15+  : menu content
+MENU_START_ROW=15
+MENU_INPUT_ROW=24
+ANIM_PID=""
+_IN_ALT_SCREEN=false
+
+# When true, INT signal exits the script.  Set false during full-screen operations
+# (e.g. docker logs -f) so Ctrl+C kills the child but returns to the menu.
+_ALLOW_INT_EXIT=true
+
+# Logo lines (shared between static draw and intro animation loop).
+_LOGO_L0="                           ▄▄  ▄█                                                                                        "
+_LOGO_L1="▀███▀▀▀██▄               ▀███  ██           ▀████▄     ▄███▀████▄     ▄███▀ ▄▄█▀▀██▄     ▀████▀         ██     ▀███▀▀▀██▄"
+_LOGO_L2="  ██    ▀██▄               ██  ▀▀             ████    ████   ████    ████ ▄██▀    ▀██▄     ██          ▄██▄      ██    ██"
+_LOGO_L3="  ██     ▀██▄█▀██▄    ▄█▀▀███     ▄██▀███     █ ██   ▄█ ██   █ ██   ▄█ ██ ██▀      ▀██     ██         ▄█▀██▄     ██    ██"
+_LOGO_L4="  ██      ███   ██  ▄██    ██     ██   ▀▀     █  ██  █▀ ██   █  ██  █▀ ██ ██        ██     ██        ▄█  ▀██     ██▀▀▀█▄▄"
+_LOGO_L5="  ██     ▄██▄█████  ███    ██     ▀█████▄     █  ██▄█▀  ██   █  ██▄█▀  ██ ██▄      ▄██     ██     ▄  ████████    ██    ▀█"
+_LOGO_L6="  ██    ▄██▀█   ██  ▀██    ██     █▄   ██     █  ▀██▀   ██   █  ▀██▀   ██ ▀██▄    ▄██▀     ██    ▄█ █▀      ██   ██    ▄█"
+_LOGO_L7="▄████████▀ ▀████▀██▄ ▀████▀███▄   ██████▀   ▄███▄ ▀▀  ▄████▄███▄ ▀▀  ▄████▄ ▀▀████▀▀     █████████████▄   ▄████▄████████"
+
+# Intro animation loop — runs as a forked subprocess for ~3 seconds at startup.
+# Writes to /dev/tty directly. Uses save/restore cursor escape sequences.
+# Fire palette: red(196) → orange(202) → amber(208) → gold(214) → yellow(220) → bright(226)
+_logo_anim_loop() {
+    local -a L=("$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8")
+    # Palette index 0 = hot red, ascending = cooler/brighter
+    local -a P=(196 196 202 208 214 220 226 220 214 208 202 196)
+    local -a S=(0 0 1 2 1 0)   # shimmer nudge per phase
+    local plen=12 slen=6 llen=8
+    local f=0 ci ph
+
+    while true; do
+        # Save cursor, jump to logo row 2, hide cursor
+        printf '\033[s\033[2;1H\033[?25l' > /dev/tty
+        local i
+        for ((i=0; i<llen; i++)); do
+            # Invert i so bottom line (i=7) maps to palette index 0 (hottest red).
+            # Offset by frame counter f so the heat band rises over time.
+            ci=$(( ( (llen - 1 - i) * 2 + f) % plen ))
+            ph=$(( (i + f) % slen ))
+            ci=$(( (ci + S[ph]) % plen ))
+            printf "\033[38;5;%dm%s\033[K\033[0m\n" "${P[$ci]}" "${L[$i]}" > /dev/tty
+        done
+        # Restore cursor, show cursor
+        printf '\033[u\033[?25h' > /dev/tty
+        f=$(( (f + 1) % plen ))
+        sleep 0.07
+    done
+}
+
+stop_logo_animation() {
+    if [ -n "$ANIM_PID" ]; then
+        /bin/kill "$ANIM_PID" 2>/dev/null
+        wait "$ANIM_PID" 2>/dev/null
+        ANIM_PID=""
+    fi
+}
+
+# Read a menu choice into global _MENU_INPUT.
+# Positions the cursor at the given row; backspace/delete work via the terminal's line editing.
+_MENU_INPUT=""
+_read_menu_input() {
+    local _input_row=${1:-$MENU_INPUT_ROW}
+    _MENU_INPUT=""
+    printf '\033[%d;3H\033[K' "$_input_row"
+    printf "${WHITE}Choice: ${RST}"
+    read -r _MENU_INPUT
+}
+
+_screen_int_handler() {
+    if [ "$_ALLOW_INT_EXIT" = true ]; then
+        printf '\033[r\033[?1049l\033[?25h'
+        exit 0
+    fi
+    # Inside with_full_screen: SIGINT already killed the foreground child — just return
+}
+
+# Draw the logo + subtitle bar statically (full clear + redraw).
+_draw_logo_static() {
+    printf '\033[1;1H\033[J'
+    printf '\n'
+    printf '\033[2m%s\033[K\033[0m\n'       "$_LOGO_L0"
+    printf '\033[38;5;220m%s\033[K\033[0m\n' "$_LOGO_L1"
+    printf '\033[38;5;220m%s\033[K\033[0m\n' "$_LOGO_L2"
+    printf '\033[38;5;214m%s\033[K\033[0m\n' "$_LOGO_L3"
+    printf '\033[38;5;214m%s\033[K\033[0m\n' "$_LOGO_L4"
+    printf '\033[38;5;208m%s\033[K\033[0m\n' "$_LOGO_L5"
+    printf '\033[38;5;202m%s\033[K\033[0m\n' "$_LOGO_L6"
+    printf '\033[38;5;196m%s\033[K\033[0m\n' "$_LOGO_L7"
+    printf '\n'
+    printf '\033[38;5;220m ══════════════════════════════════════════════════════════════════════════════════\033[K\033[0m\n'
+    printf '   \033[2mWoW Module Manager\033[0m  ✦  \033[2mv%s\033[0m\033[K\n' "$MANAGER_VERSION"
+    printf '\033[38;5;220m ══════════════════════════════════════════════════════════════════════════════════\033[K\033[0m\n'
+    printf '\n'
+}
+
+# Enter alt screen buffer, set scroll region, draw static logo.
+# Safe to call multiple times (idempotent for alt-screen entry).
+_setup_screen() {
+    if ! $_IN_ALT_SCREEN; then
+        printf '\033[?1049h'
+        _IN_ALT_SCREEN=true
+    fi
+    local tlines
+    tlines=$(tput lines 2>/dev/null || echo 25)
+    printf '\033[%d;%dr' "$MENU_START_ROW" "$tlines"
+    printf '\033[?25l'
+    _draw_logo_static
+    printf '\033[?25h'
+}
+
+# Plays the animated intro splash (up to 3 seconds, any key skips),
+# then freezes the logo statically for the rest of the session.
+start_logo_animation() {
+    _setup_screen
+    trap 'printf "\033[r\033[?1049l\033[?25h"' EXIT
+    trap '_screen_int_handler' INT TERM
+
+    # Start animation subprocess
+    _logo_anim_loop \
+        "$_LOGO_L0" "$_LOGO_L1" "$_LOGO_L2" "$_LOGO_L3" \
+        "$_LOGO_L4" "$_LOGO_L5" "$_LOGO_L6" "$_LOGO_L7" &
+    ANIM_PID=$!
+
+    printf '\033[%d;1H\033[K  \033[2mPress any key to skip...\033[0m' "$MENU_START_ROW"
+
+    # Wait up to 3 seconds — any keypress skips immediately
+    read -r -s -t 3 2>/dev/null || true
+
+    # Freeze: stop subprocess, redraw logo statically
+    stop_logo_animation
+    printf '\033[?25l'
+    _draw_logo_static
+    printf '\033[?25h'
+    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+}
+
+# Clear screen, run a function, restore the static logo + scroll region.
+# _ALLOW_INT_EXIT=false lets Ctrl+C kill the child but return to the menu.
+# Usage: with_full_screen <function_name> [args...]
+with_full_screen() {
+    printf '\033[r\033[H\033[2J\033[?25h'
+    _ALLOW_INT_EXIT=false
+    "$@"
+    _ALLOW_INT_EXIT=true
+    _setup_screen
+    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+}
+
 print_header() {
-    clear
-    echo ""
-    echo -e "${GOLD}╔══════════════════════════════════════════════════╗${RST}"
-    echo -e "${GOLD}║${WHITE}${BOLD}    🛠️  DAD'S MMO LAB — WoW Module Manager       ${RST}${GOLD}║${RST}"
-    echo -e "${GOLD}║${WHITE}        v${MANAGER_VERSION}                                    ${RST}${GOLD}║${RST}"
-    echo -e "${GOLD}╚══════════════════════════════════════════════════╝${RST}"
-    echo ""
+    # Move to the menu content row and clear everything below.
+    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
 }
 
 print_step()    { echo ""; echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
@@ -72,6 +227,8 @@ press_enter() {
     echo ""
     printf "${WHITE}Press ENTER to continue...${RST}"
     read -r
+    # Erase the prompt line so it doesn't linger when the menu redraws
+    printf '\033[1A\033[2K'
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -95,6 +252,7 @@ declare -a MODULE_REGISTRY=(
     "mod-autobalance|Auto Balance (dynamic difficulty)|https://github.com/azerothcore/mod-autobalance.git|world"
     "mod-transmog|Transmogrification|https://github.com/azerothcore/mod-transmog.git|world,characters"
     "mod-1v1-arena|1v1 Arena|https://github.com/azerothcore/mod-1v1-arena.git|characters"
+    "mod-ale|AzerothCore Lua Engine (ALE)|https://github.com/azerothcore/mod-ale.git|"
 )
 
 # ─────────────────────────────────────────────────────────────
@@ -520,6 +678,26 @@ declare -a MODULE_UPDATE_FILES=(
     "mod-learn-spells|acore_world|"
     "mod-individual-progression|acore_world|"
     "mod-autobalance|acore_world|"
+    "mod-ale|acore_world|"
+)
+
+# ALE Lua Script registry.
+# These are Lua scripts that run on the ALE engine — NOT compiled C++ modules.
+# Clones stored in $SERVER_DIR/ale_scripts/<key>/
+# Deployed to  $SERVER_DIR/env/dist/etc/modules/lua_scripts/
+# Format: "key|display name|git url"
+# Special install steps (SQL, client addons, config) are handled per-key
+# inside ale_script_install() and the configure_ale_* functions.
+declare -a ALE_SCRIPT_REGISTRY=(
+    "accountwide|Accountwide Systems (achievements, currency, mounts, pets)|https://github.com/Aldori15/azerothcore-eluna-accountwide.git"
+    "levelupreward|Level Up Reward (mail gold/items on level-up)|https://github.com/55Honey/Acore_LevelUpReward.git"
+    "exchangenpc|Exchange NPC (configurable item-exchange vendor NPC)|https://github.com/55Honey/Acore_ExchangeNpc.git"
+    "activechat|Active Chat (simulated world/guild chat for immersion)|https://github.com/Day36512/ActiveChat.git"
+    "battlepass|Battle Pass System (XP progression + rewards + client addon)|https://github.com/Shonik/lua-battlepass.git"
+    "paragon|Paragon Anniversary (endless post-80 stat progression + client addon)|https://github.com/Grim-Batol/Paragon-Anniversary.git"
+    "bmah|Black Market Auction House (MoP-style BMAH + client addon)|https://github.com/Youpeoples/Black-Market-Auction-House.git"
+    "lootpet|Loot Pet (vanity pet auto-loots nearby corpses)|https://github.com/Brytenwally/Lootpet.git"
+    "sod|Season of Discovery Buffs (phased leveling XP rate bonus)|https://github.com/notepadguyOfficial/acore_sod.git"
 )
 
 # Discover the actual SQL filenames in a module's sql dir.
@@ -1067,194 +1245,979 @@ configure_ahbot() {
 }
 
 # ─────────────────────────────────────────────────────────────
-# MAIN MENUS
+# ALE CONFIGURATION
 # ─────────────────────────────────────────────────────────────
-menu_add() {
-    print_header
-    print_step "Add Modules"
+# Post-install setup for mod-ale (AzerothCore Lua Engine):
+#   1. Creates the lua_scripts directory in env/dist/etc/modules/
+#   2. Copies mod_ale.conf.dist → mod_ale.conf (skip if already exists)
+#   3. Patches ALE.ScriptPath to the container-visible absolute path
+#
+# env/dist/etc/ is volume-mounted to /azerothcore/env/dist/etc/ inside
+# the container, so writing here is equivalent to writing inside the
+# container — no docker cp needed.
+configure_ale() {
+    print_step "Configuring AzerothCore Lua Engine (ALE)"
 
-    # Show clear warning for non-playerbots installs
-    if [ "$SERVER_TYPE" != "playerbots" ]; then
+    if ! module_is_installed "mod-ale"; then
+        print_error "mod-ale is not installed yet!"
+        print_info "Add it first via the main menu (Add modules)."
+        return 1
+    fi
+
+    # ── Create the lua_scripts directory ─────────────────────
+    local lua_scripts_dir="$SERVER_DIR/env/dist/etc/modules/lua_scripts"
+    print_info "Creating lua_scripts directory..."
+    if mkdir -p "$lua_scripts_dir"; then
+        print_success "Created: $lua_scripts_dir"
+    else
+        print_error "Failed to create lua_scripts directory."
+        return 1
+    fi
+
+    # ── Copy dist conf if no active conf exists yet ───────────
+    local conf_dist="$SERVER_DIR/modules/mod-ale/conf/mod_ale.conf.dist"
+    local conf_active="$SERVER_DIR/env/dist/etc/modules/mod_ale.conf"
+
+    if [ ! -f "$conf_dist" ]; then
+        print_error "Couldn't find $conf_dist"
+        print_info "The module may not have cloned correctly."
+        return 1
+    fi
+
+    mkdir -p "$SERVER_DIR/env/dist/etc/modules"
+    if [ -f "$conf_active" ]; then
+        print_info "Active conf already exists — keeping it, updating ScriptPath only."
+    else
+        cp "$conf_dist" "$conf_active"
+        print_success "Copied conf to: $conf_active"
+    fi
+
+    # ── Patch ALE.ScriptPath to the container-visible path ───
+    # Always applied so the path is correct whether this is a fresh copy
+    # or an existing file (e.g. after a server directory move).
+    sed -i \
+        's|^[[:space:]]*ALE\.ScriptPath[[:space:]]*=.*$|ALE.ScriptPath = "/azerothcore/env/dist/etc/modules/lua_scripts"|' \
+        "$conf_active"
+    print_success "Set ALE.ScriptPath = \"/azerothcore/env/dist/etc/modules/lua_scripts\""
+
+    echo ""
+    print_info "ALE configuration complete."
+    print_info "Place your Lua scripts in:"
+    print_info "  $lua_scripts_dir"
+    print_info "Restart the worldserver for changes to take effect."
+}
+
+# ─────────────────────────────────────────────────────────────
+# ALE LUA SCRIPT MANAGEMENT
+# ─────────────────────────────────────────────────────────────
+# Lua scripts that extend gameplay via the ALE engine.
+# Clones:   $SERVER_DIR/ale_scripts/<key>/
+# Deployed: $SERVER_DIR/env/dist/etc/modules/lua_scripts/
+#           = /azerothcore/env/dist/etc/modules/lua_scripts/ in-container
+
+ale_script_clone_dir()    { echo "$SERVER_DIR/ale_scripts/$1"; }
+ale_script_is_installed() { [ -d "$SERVER_DIR/ale_scripts/$1/.git" ]; }
+ale_lua_scripts_dir()     { echo "$SERVER_DIR/env/dist/etc/modules/lua_scripts"; }
+
+# Check whether a script's Lua files are present in the lua_scripts deploy dir.
+# Uses the same per-key path knowledge as ale_deploy_lua_files().
+ale_lua_is_deployed() {
+    local key="$1"
+    local lua_dir
+    lua_dir=$(ale_lua_scripts_dir)
+    case "$key" in
+        accountwide)   [ -d "$lua_dir/accountwide" ] && \
+                       ls "$lua_dir/accountwide"/*.lua &>/dev/null ;;
+        levelupreward) ls "$lua_dir"/LevelUpReward*.lua &>/dev/null 2>&1 || \
+                       ls "$lua_dir"/levelup*.lua &>/dev/null 2>&1 || \
+                       ls "$lua_dir"/LevelUp*.lua &>/dev/null 2>&1 ;;
+        exchangenpc)   ls "$lua_dir"/Exchange*.lua &>/dev/null 2>&1 || \
+                       ls "$lua_dir"/exchange*.lua &>/dev/null 2>&1 ;;
+        activechat)    [ -d "$lua_dir/activechat" ] ;;
+        battlepass)    [ -d "$lua_dir/battlepass" ] ;;
+        paragon)       [ -d "$lua_dir/paragon" ] ;;
+        bmah)          [ -f "$lua_dir/bmah_server.lua" ] ;;
+        lootpet)       [ -f "$lua_dir/LootPet.lua" ] ;;
+        sod)           ls "$lua_dir"/sod*.lua &>/dev/null 2>&1 || \
+                       ls "$lua_dir"/SoD*.lua &>/dev/null 2>&1 || \
+                       ls "$lua_dir"/season*.lua &>/dev/null 2>&1 ;;
+        *)             false ;;
+    esac
+}
+
+# Ensure the database container is up. Returns 1 if it cannot start.
+ensure_db_running() {
+    refresh_container_names
+    if container_running "$DB_CONTAINER"; then
+        return 0
+    fi
+    print_info "Starting database container..."
+    (cd "$SERVER_DIR" && docker compose up -d ac-database 2>/dev/null) || true
+    refresh_container_names
+    local i
+    for i in $(seq 1 15); do
+        if docker exec "$DB_CONTAINER" mysqladmin ping \
+            -uroot -p"$DB_ROOT_PASSWORD" &>/dev/null 2>&1; then
+            print_success "Database is up."
+            return 0
+        fi
+        sleep 2
+    done
+    print_error "Database did not become ready."
+    return 1
+}
+
+# Run a SQL file against a named database. DB must be running.
+# Usage: ale_run_sql_file <db_name> <path_to_sql_file>
+ale_run_sql_file() {
+    local db_name="$1" sql_file="$2"
+    if [ ! -f "$sql_file" ]; then
+        print_warning "SQL file not found: $sql_file"
+        return 1
+    fi
+    print_info "Applying SQL: $(basename "$sql_file") → $db_name"
+    if docker exec -i "$DB_CONTAINER" mysql \
+        -uroot -p"$DB_ROOT_PASSWORD" "$db_name" < "$sql_file" 2>&1; then
+        print_success "SQL applied: $(basename "$sql_file")"
+    else
+        print_warning "SQL had errors — table may already exist, which is usually safe."
+    fi
+}
+
+# ── Per-script post-install configuration ────────────────────
+
+configure_ale_battlepass() {
+    local clone_dir
+    clone_dir=$(ale_script_clone_dir "battlepass")
+
+    print_step "Battle Pass — SQL & Configuration"
+
+    # Apply SQL
+    print_info "Applying Battle Pass SQL (requires database to be running)..."
+    if ensure_db_running; then
+        ale_run_sql_file "acore_world"      "$clone_dir/sql/battlepass_world.sql"
+        ale_run_sql_file "acore_characters" "$clone_dir/sql/battlepass_characters.sql"
+    else
+        print_warning "Skipping SQL — apply manually when the database is running:"
+        print_info "  $clone_dir/sql/battlepass_world.sql      → acore_world"
+        print_info "  $clone_dir/sql/battlepass_characters.sql → acore_characters"
+    fi
+
+    # Interactive config updates to battlepass_config table
+    if container_running "$DB_CONTAINER"; then
         echo ""
-        print_warning "Module installs on $SERVER_NAME are experimental."
-        print_info "Modules will be cloned, but rebuilding the worldserver"
-        print_info "to actually USE them is not supported on this install type."
-        print_info ""
-        print_info "Recommended: reinstall as Playerbots variant for full module support."
+        print_info "Configure Battle Pass settings (press ENTER to keep defaults):"
         echo ""
-        if ! ask_yes_no "Continue anyway (modules will be cloned but inactive)?"; then
-            return
+        local max_level exp_per_level debug_mode
+        printf "${WHITE}  Max Battle Pass level     [100]: ${RST}"; read -r max_level
+        printf "${WHITE}  Base XP required per level [1000]: ${RST}"; read -r exp_per_level
+        printf "${WHITE}  Enable debug logging  (0=off/1=on) [0]: ${RST}"; read -r debug_mode
+        max_level=${max_level:-100}
+        exp_per_level=${exp_per_level:-1000}
+        debug_mode=${debug_mode:-0}
+
+        if docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
+            -e "UPDATE battlepass_config SET value='$max_level'    WHERE \`key\`='max_level';
+                UPDATE battlepass_config SET value='$exp_per_level' WHERE \`key\`='exp_per_level';
+                UPDATE battlepass_config SET value='$debug_mode'   WHERE \`key\`='debug_mode';" \
+            2>/dev/null; then
+            print_success "Battle Pass config applied."
+        else
+            print_warning "Config update failed — the battlepass_config table may not exist yet."
+            print_info "Run the SQL files above first, then reconfigure via option C."
         fi
     fi
 
+    # Client addon
     echo ""
-    echo -e "${WHITE}Available modules:${RST}"
+    print_step "Battle Pass — Client Addon Required"
+    echo -e "${WHITE}The Battle Pass system includes a WoW client addon for the in-game UI.${RST}"
     echo ""
+    echo -e "${WHITE}${BOLD}Copy this folder to your WoW client's AddOns directory:${RST}"
+    echo -e "  ${CYAN}Source:${RST}      $clone_dir/BattlePass/"
+    echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/BattlePass/"
+    echo ""
+    echo -e "${WHITE}Use ${CYAN}/bp${WHITE} or ${CYAN}/battlepass${WHITE} in-game to open the Battle Pass frame.${RST}"
+    echo -e "${WHITE}Player commands: ${CYAN}.bp${WHITE} | ${CYAN}.bp rewards${WHITE} | ${CYAN}.bp claim <level>${RST}"
+}
 
-    local i=1
-    local -a available_keys=()
-    local entry key name url sql_dirs marker
-    for entry in "${MODULE_REGISTRY[@]}"; do
-        IFS='|' read -r key name url sql_dirs <<< "$entry"
-        if module_is_installed "$key"; then
-            marker="${GREEN}[installed]${RST}"
+configure_ale_paragon() {
+    local clone_dir
+    clone_dir=$(ale_script_clone_dir "paragon")
+
+    print_step "Paragon Anniversary — SQL Migrations Required"
+    echo ""
+    echo -e "${WHITE}Paragon Anniversary requires SQL files to be applied BEFORE first startup.${RST}"
+    echo -e "${WHITE}Tables are NOT auto-created — you must run these migrations manually.${RST}"
+    echo ""
+    if ensure_db_running; then
+        local paragon_sql_dir="$clone_dir/sql"
+        local sql_files
+        sql_files=$(find "$paragon_sql_dir" -name "*.sql" 2>/dev/null | sort)
+        if [ -n "$sql_files" ]; then
+            print_info "Found SQL files in $paragon_sql_dir:"
+            echo "$sql_files" | while read -r f; do echo "    - $(basename "$f")"; done
+            echo ""
+            if ask_yes_no "Apply all Paragon SQL files to acore_world now?"; then
+                echo "$sql_files" | while read -r f; do
+                    ale_run_sql_file "acore_world" "$f"
+                done
+            else
+                print_warning "Apply SQL manually before starting the server:"
+                echo "$sql_files" | while read -r f; do
+                    print_info "  mysql acore_world < $f"
+                done
+            fi
         else
-            marker="${YELLOW}[available]${RST}"
-        fi
-        printf "  %2d) %-42s %b\n" "$i" "$name" "$marker"
-        available_keys+=("$entry")
-        i=$((i + 1))
-    done
-    echo ""
-    echo -e "${WHITE}  Enter numbers separated by spaces (e.g. 1 3 5)${RST}"
-    echo -e "${WHITE}  Or just ENTER to cancel.${RST}"
-    echo ""
-    printf "${WHITE}Choose: ${RST}"
-    read -r choices
-
-    [ -z "$choices" ] && return
-
-    local selected=()
-    local choice
-    for choice in $choices; do
-        if [[ "$choice" =~ ^[0-9]+$ ]] && \
-           [ "$choice" -ge 1 ] && [ "$choice" -le "${#available_keys[@]}" ]; then
-            selected+=("${available_keys[$((choice - 1))]}")
-        fi
-    done
-
-    if [ "${#selected[@]}" -eq 0 ]; then
-        print_warning "No valid choices."
-        press_enter; return
-    fi
-
-    for entry in "${selected[@]}"; do
-        IFS='|' read -r key name url sql_dirs <<< "$entry"
-        module_install "$key" "$name" "$url" "$sql_dirs" || true
-    done
-
-    echo ""
-    print_info "Modules cloned and SQL imported."
-
-    if [ "$SERVER_TYPE" = "playerbots" ]; then
-        print_info "Rebuild the worldserver to compile the new modules in."
-        echo ""
-        if ask_yes_no "Rebuild the worldserver now?"; then
-            rebuild_worldserver
-        else
-            print_info "Run me again later and pick Rebuild from the main menu."
+            print_warning "No SQL files found in $paragon_sql_dir"
+            print_info "Check the repo's sql/ directory and apply required migrations."
         fi
     else
-        print_info "(Skipping rebuild prompt — not supported on this install type.)"
+        print_warning "Database not available. Apply SQL files from $clone_dir/sql/ manually."
     fi
 
-    # Special handling: AH Bot needs character configuration after add
-    for entry in "${selected[@]}"; do
-        IFS='|' read -r key name url sql_dirs <<< "$entry"
-        if [ "$key" = "mod-ah-bot" ]; then
+    echo ""
+    print_step "Paragon Anniversary — Configuration Guide"
+    echo ""
+    echo -e "${WHITE}${BOLD}Key settings — edit in the ${CYAN}paragon_config${WHITE}${BOLD} database table:${RST}"
+    echo ""
+    printf "  ${CYAN}%-38s${RST} ${WHITE}%s${RST}\n" "LEVEL_LINKED_TO_ACCOUNT" "0 = per-character  |  1 = account-wide shared XP"
+    printf "  ${CYAN}%-38s${RST} ${WHITE}%s${RST}\n" "PARAGON_LEVEL_CAP"        "Max paragon level (0 = unlimited)"
+    printf "  ${CYAN}%-38s${RST} ${WHITE}%s${RST}\n" "BASE_MAX_EXPERIENCE"      "XP needed per level (multiplied by paragon level)"
+    printf "  ${CYAN}%-38s${RST} ${WHITE}%s${RST}\n" "POINTS_PER_LEVEL"         "Stat points awarded each paragon level"
+    printf "  ${CYAN}%-38s${RST} ${WHITE}%s${RST}\n" "UNIVERSAL_CREATURE_EXPERIENCE" "Default XP per creature kill (default: 50)"
+    echo ""
+    echo -e "${DIM}Full install guide: $clone_dir/doc/INSTALL.md${RST}"
+
+    # Client addon
+    echo ""
+    print_step "Paragon Anniversary — Client Addon Required"
+    echo -e "${WHITE}Paragon includes a WoW client addon for the in-game progression UI.${RST}"
+    echo ""
+    echo -e "${WHITE}${BOLD}Find the addon folder in the cloned repo and copy it to AddOns:${RST}"
+    echo -e "  ${CYAN}Look in:${RST}     $clone_dir/"
+    echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/ParagonAnniversary/"
+    echo ""
+    echo -e "${DIM}The addon communicates with the server via the ParagonAnniversary protocol.${RST}"
+}
+
+configure_ale_bmah() {
+    local clone_dir
+    clone_dir=$(ale_script_clone_dir "bmah")
+    local lua_dir
+    lua_dir=$(ale_lua_scripts_dir)
+    local deployed_file="$lua_dir/bmah_server.lua"
+
+    print_step "Black Market AH — NPC Configuration"
+    echo ""
+    echo -e "${WHITE}The BMAH needs a gossip-enabled NPC in-world to act as the vendor.${RST}"
+    echo -e "${WHITE}Its entry ID(s) must be added to the ${CYAN}BMAH_VENDOR_NPCs${WHITE} list in bmah_server.lua.${RST}"
+    echo -e "${DIM}The list format is: local BMAH_VENDOR_NPCs = { 2069430, 90001, ... }${RST}"
+    echo ""
+
+    if [ -f "$deployed_file" ]; then
+        printf "${WHITE}Enter your gossip NPC entry ID to add [90001]: ${RST}"
+        read -r npc_id
+        npc_id=${npc_id:-90001}
+        if [[ "$npc_id" =~ ^[0-9]+$ ]]; then
+            # Append the new ID into the existing brace-enclosed list
+            if sed -i "s/local BMAH_VENDOR_NPCs = {/local BMAH_VENDOR_NPCs = { $npc_id,/" \
+                "$deployed_file" 2>/dev/null && \
+               grep -q "$npc_id" "$deployed_file"; then
+                print_success "Added NPC $npc_id to BMAH_VENDOR_NPCs list."
+            else
+                print_warning "Auto-patch failed or NPC already present. Edit manually:"
+                print_info "  File: $deployed_file"
+                print_info "  Add ${CYAN}$npc_id${RST} to: local BMAH_VENDOR_NPCs = { ... }"
+            fi
+        else
+            print_warning "Invalid entry ID — edit $deployed_file manually."
+        fi
+    else
+        print_warning "bmah_server.lua not found at expected path:"
+        print_info "  $deployed_file"
+        print_info "Deploy the script first, then edit BMAH_VENDOR_NPCs at the top of the file."
+    fi
+
+    echo ""
+    echo -e "${WHITE}Additional config (in bmah_server.lua):${RST}"
+    printf "  ${CYAN}%-22s${RST} ${WHITE}%s${RST}\n" "common_price"    "Starting bid for common items"
+    printf "  ${CYAN}%-22s${RST} ${WHITE}%s${RST}\n" "rare_price"      "Starting bid for rare items"
+    printf "  ${CYAN}%-22s${RST} ${WHITE}%s${RST}\n" "ultra_rare_price" "Starting bid for ultra-rare items"
+    echo ""
+    echo -e "${WHITE}GM commands: ${CYAN}/bmah flush${WHITE} (expire all) | ${CYAN}/bmah fill${WHITE} (refill immediately)${RST}"
+
+    # Client addon
+    echo ""
+    print_step "Black Market AH — Client Addon Required"
+    echo -e "${WHITE}BMAH includes a WoW addon that recreates the Mists of Pandaria BMAH UI.${RST}"
+    echo ""
+    echo -e "${WHITE}${BOLD}Copy this folder to your WoW client's AddOns directory:${RST}"
+    echo -e "  ${CYAN}Source:${RST}      $clone_dir/BlackMarketUI/"
+    echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/BlackMarketUI/"
+    echo ""
+    echo -e "${WHITE}After copying, run ${CYAN}/reload${WHITE} or restart the WoW client.${RST}"
+}
+
+# ── Lua file deployment (per-script copy strategy) ───────────
+# Each script has its own repo layout; this handles the mapping.
+ale_deploy_lua_files() {
+    local key="$1" clone_dir="$2"
+    local lua_dir
+    lua_dir=$(ale_lua_scripts_dir)
+    mkdir -p "$lua_dir"
+
+    case "$key" in
+        accountwide)
+            # Upstream layout: lua_scripts/AccountWide/*.lua
+            local src="$clone_dir/lua_scripts/AccountWide"
+            if [ -d "$src" ]; then
+                mkdir -p "$lua_dir/accountwide"
+                cp "$src"/*.lua "$lua_dir/accountwide/" && \
+                    print_success "Deployed → lua_scripts/accountwide/" || \
+                    print_warning "Copy failed — check $src"
+            else
+                print_warning "Expected directory not found: $src"
+                print_info "Manually copy .lua files to: $lua_dir/accountwide/"
+            fi
+            ;;
+        levelupreward)
+            local count=0
+            if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
+                count=$(ls "$clone_dir"/*.lua 2>/dev/null | wc -l | tr -d ' ')
+                print_success "Deployed $count file(s) → lua_scripts/"
+            else
+                print_warning "No .lua files found in clone root — check $clone_dir"
+            fi
+            ;;
+        exchangenpc)
+            local count=0
+            if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
+                count=$(ls "$clone_dir"/*.lua 2>/dev/null | wc -l | tr -d ' ')
+                print_success "Deployed $count file(s) → lua_scripts/"
+            else
+                print_warning "No .lua files found in clone root — check $clone_dir"
+            fi
+            ;;
+        activechat)
+            # Upstream layout: ActiveChat/ subdirectory
+            local src="$clone_dir/ActiveChat"
+            if [ -d "$src" ]; then
+                mkdir -p "$lua_dir/activechat"
+                cp -r "$src"/. "$lua_dir/activechat/" && \
+                    print_success "Deployed → lua_scripts/activechat/" || \
+                    print_warning "Copy failed — check $src"
+            else
+                print_warning "Expected directory not found: $src"
+                print_info "Manually copy ActiveChat/ contents to: $lua_dir/activechat/"
+            fi
+            ;;
+        battlepass)
+            if [ -d "$clone_dir/lua_scripts" ]; then
+                cp -r "$clone_dir/lua_scripts/." "$lua_dir/" && \
+                    print_success "Deployed → lua_scripts/ (lib/CSMH + battlepass/)" || \
+                    print_warning "Copy failed — check $clone_dir/lua_scripts"
+            else
+                print_warning "lua_scripts/ dir not found in clone — check $clone_dir manually."
+            fi
+            ;;
+        paragon)
+            # Upstream layout: serverside/paragon/
+            local src="$clone_dir/serverside/paragon"
+            if [ -d "$src" ]; then
+                cp -r "$src" "$lua_dir/" && \
+                    print_success "Deployed → lua_scripts/paragon/" || \
+                    print_warning "Copy failed — check $src"
+            else
+                print_warning "Expected directory not found: $src"
+                print_info "Manually copy paragon/ contents to: $lua_dir/paragon/"
+            fi
+            ;;
+        bmah)
+            # Upstream layout: Server Files/lua_scripts/bmah_server.lua
+            local src="$clone_dir/Server Files/lua_scripts/bmah_server.lua"
+            if [ -f "$src" ]; then
+                cp "$src" "$lua_dir/" && \
+                    print_success "Deployed bmah_server.lua → lua_scripts/" || \
+                    print_warning "Copy failed — check '$src'"
+            else
+                print_warning "Expected file not found: $src"
+                print_info "Manually copy bmah_server.lua to: $lua_dir/"
+            fi
+            ;;
+        lootpet)
+            if [ -f "$clone_dir/LootPet.lua" ]; then
+                cp "$clone_dir/LootPet.lua" "$lua_dir/" && \
+                    print_success "Deployed LootPet.lua → lua_scripts/" || \
+                    print_warning "Copy failed"
+            else
+                print_warning "LootPet.lua not found in $clone_dir"
+            fi
+            ;;
+        sod)
+            local count=0
+            if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
+                count=$(ls "$clone_dir"/*.lua 2>/dev/null | wc -l | tr -d ' ')
+                print_success "Deployed $count file(s) → lua_scripts/"
+            else
+                print_warning "No .lua files found in clone root — check $clone_dir"
+            fi
+            ;;
+        *)
+            if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
+                print_success "Deployed → lua_scripts/ (generic copy)"
+            else
+                print_warning "No .lua files found in $clone_dir — check repo layout manually."
+            fi
+            ;;
+    esac
+}
+
+# Clone/update, deploy Lua files, run per-script extras.
+ale_script_install() {
+    local key="$1" name="$2" url="$3"
+    local clone_dir
+    clone_dir=$(ale_script_clone_dir "$key")
+
+    print_step "Installing ALE script: $name"
+
+    mkdir -p "$SERVER_DIR/ale_scripts"
+    if ale_script_is_installed "$key"; then
+        print_info "Already cloned — pulling latest..."
+        (cd "$clone_dir" && git pull --depth 1 2>/dev/null) || \
+            print_warning "git pull failed — using existing copy"
+    else
+        if ! git clone --depth 1 "$url" "$clone_dir"; then
+            print_error "Clone failed for $name!"
+            return 1
+        fi
+        print_success "Cloned $name"
+    fi
+
+    ale_deploy_lua_files "$key" "$clone_dir"
+
+    # Per-script extra steps
+    case "$key" in
+        accountwide)
             echo ""
-            print_info "AH Bot is installed but not yet configured."
-            if ask_yes_no "Configure AH Bot now (assign a bot character)?"; then
-                configure_ahbot
+            print_warning "Install on a FRESH server is strongly recommended."
+            print_info "00_AccountWideUtils.lua is required alongside all other Accountwide"
+            print_info "scripts — it has been deployed with the rest in lua_scripts/accountwide/."
+            echo ""
+            print_info "Accountwide requires a characters DB schema."
+            if ask_yes_no "Apply Accountwide characters SQL now?"; then
+                if ensure_db_running; then
+                    local sql_file="$clone_dir/sql/create_accountwide_tables.sql"
+                    if [ -f "$sql_file" ]; then
+                        ale_run_sql_file "acore_characters" "$sql_file"
+                    else
+                        # Fallback: search for the file if name changed upstream
+                        local found
+                        found=$(find "$clone_dir/sql" -name "*.sql" 2>/dev/null | head -1)
+                        if [ -n "$found" ]; then
+                            ale_run_sql_file "acore_characters" "$found"
+                        else
+                            print_warning "SQL file not found in $clone_dir/sql/"
+                        fi
+                    fi
+                fi
+            else
+                print_info "Apply manually: mysql acore_characters < $clone_dir/sql/create_accountwide_tables.sql"
             fi
-        fi
-    done
+            ;;
+        exchangenpc)
+            echo ""
+            print_info "Exchange NPC requires a world SQL file to be applied."
+            if ask_yes_no "Apply Exchange NPC world SQL now?"; then
+                if ensure_db_running; then
+                    # Prefer the *_Up.sql (install) variant; avoid Down/Revert scripts
+                    local sql_file
+                    sql_file=$(find "$clone_dir" -name "*_Up.sql" 2>/dev/null | head -1)
+                    if [ -z "$sql_file" ]; then
+                        # Fallback: any SQL that isn't a rollback
+                        sql_file=$(find "$clone_dir" -name "*.sql" 2>/dev/null \
+                            | grep -v -i "down\|revert" | head -1)
+                    fi
+                    if [ -n "$sql_file" ]; then
+                        ale_run_sql_file "acore_world" "$sql_file"
+                    else
+                        print_warning "No install SQL file found in $clone_dir"
+                        print_info "Manually apply the *_Up.sql file from the repo."
+                    fi
+                fi
+            fi
+            echo ""
+            print_info "After restart, teleport to the NPC: ${CYAN}.go zonexy 51.1 27.7 976${RST}"
+            ;;
+        battlepass)
+            echo ""
+            if ask_yes_no "Configure Battle Pass SQL and settings now?"; then
+                configure_ale_battlepass
+            else
+                print_info "Run option 4 → c5 to reconfigure Battle Pass later."
+                print_info "Remember to apply SQL manually from:"
+                print_info "  $clone_dir/sql/"
+            fi
+            ;;
+        paragon)
+            echo ""
+            if ask_yes_no "Show Paragon Anniversary configuration guide now?"; then
+                configure_ale_paragon
+            fi
+            ;;
+        bmah)
+            echo ""
+            if ask_yes_no "Configure Black Market AH (NPC ID + client addon info) now?"; then
+                configure_ale_bmah
+            fi
+            ;;
+    esac
 
-    press_enter
+    echo ""
+    print_info "Reload Lua scripts in-game with: ${CYAN}.reload ale${RST}"
+    print_info "Or restart the worldserver from the main menu."
+    return 0
 }
 
-menu_remove() {
-    print_header
-    print_step "Remove Modules"
+ale_script_remove() {
+    local key="$1" name="$2"
+    local clone_dir
+    clone_dir=$(ale_script_clone_dir "$key")
+    local lua_dir
+    lua_dir=$(ale_lua_scripts_dir)
 
-    echo ""
-    echo -e "${WHITE}Installed modules:${RST}"
-    echo ""
+    print_step "Removing ALE script: $name"
 
-    local i=1
-    local -a installed_keys=()
-    local entry key name
-    for entry in "${MODULE_REGISTRY[@]}"; do
-        IFS='|' read -r key name _ _ <<< "$entry"
-        if module_is_installed "$key"; then
-            printf "  %2d) %s\n" "$i" "$name"
-            installed_keys+=("$entry")
-            i=$((i + 1))
-        fi
-    done
-
-    if [ "${#installed_keys[@]}" -eq 0 ]; then
-        echo "  (none)"
-        press_enter; return
+    if ! ale_script_is_installed "$key"; then
+        print_info "$name is not installed — nothing to do."
+        return 0
     fi
 
+    # For scripts whose deployed filenames come from the clone, collect them BEFORE removal
+    local -a generic_deployed_files=()
+    case "$key" in
+        levelupreward|exchangenpc|sod)
+            while IFS= read -r f; do
+                generic_deployed_files+=("$(basename "$f")")
+            done < <(find "$clone_dir" -maxdepth 1 -name "*.lua" 2>/dev/null)
+            ;;
+    esac
+
+    if ask_yes_no "Remove clone at $clone_dir?"; then
+        rm -rf "$clone_dir"
+        print_success "Clone removed."
+    fi
+
+    # Offer to remove deployed Lua files
+    local deployed_hint
+    case "$key" in
+        accountwide) deployed_hint="$lua_dir/accountwide/" ;;
+        activechat)  deployed_hint="$lua_dir/activechat/" ;;
+        battlepass)  deployed_hint="$lua_dir/battlepass/  and  $lua_dir/lib/" ;;
+        paragon)     deployed_hint="$lua_dir/paragon/" ;;
+        bmah)        deployed_hint="$lua_dir/bmah_server.lua" ;;
+        lootpet)     deployed_hint="$lua_dir/LootPet.lua" ;;
+        *)           deployed_hint="$lua_dir/ (search for files from this script)" ;;
+    esac
+
     echo ""
-    printf "${WHITE}Number to remove (or ENTER to cancel): ${RST}"
-    read -r choice
-
-    [ -z "$choice" ] && return
-    if ! [[ "$choice" =~ ^[0-9]+$ ]] || \
-       [ "$choice" -lt 1 ] || [ "$choice" -gt "${#installed_keys[@]}" ]; then
-        print_warning "Invalid choice."
-        press_enter; return
+    print_info "Deployed files: $deployed_hint"
+    if ask_yes_no "Also remove deployed Lua files from lua_scripts/?"; then
+        case "$key" in
+            accountwide) rm -rf "$lua_dir/accountwide" ;;
+            activechat)  rm -rf "$lua_dir/activechat" ;;
+            battlepass)  rm -rf "$lua_dir/battlepass" "$lua_dir/lib" ;;
+            paragon)     rm -rf "$lua_dir/paragon" ;;
+            bmah)        rm -f  "$lua_dir/bmah_server.lua" ;;
+            lootpet)     rm -f  "$lua_dir/LootPet.lua" ;;
+            levelupreward|exchangenpc|sod)
+                local f
+                for f in "${generic_deployed_files[@]}"; do
+                    rm -f "$lua_dir/$f" 2>/dev/null || true
+                done
+                ;;
+        esac
+        print_success "Deployed files removed."
     fi
 
-    IFS='|' read -r key name _ _ <<< "${installed_keys[$((choice - 1))]}"
-    module_remove "$key" "$name"
-
-    if [ "$SERVER_TYPE" = "playerbots" ]; then
-        echo ""
-        print_info "Rebuild needed for module removal to take effect."
-        if ask_yes_no "Rebuild the worldserver now?"; then
-            rebuild_worldserver
-        fi
-    fi
-
-    press_enter
+    print_info "(Database tables created by this script are kept — removing them risks data loss.)"
 }
 
-menu_list() {
-    print_header
-    print_step "Installed Modules"
+# ── ALE Scripts submenu ───────────────────────────────────────
+menu_ale_scripts() {
+    local page_start=0
+    while true; do
+        local tlines; tlines=$(tput lines 2>/dev/null || echo 24)
 
-    if [ ! -d "$SERVER_DIR/modules" ]; then
-        echo "  (no modules directory yet)"
-        press_enter; return
-    fi
+        # Clear menu area
+        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
 
-    local count=0
-    local entry key name
-    for entry in "${MODULE_REGISTRY[@]}"; do
-        IFS='|' read -r key name _ _ <<< "$entry"
-        if module_is_installed "$key"; then
-            printf "  %-30s — %s\n" "$key" "$name"
-            count=$((count + 1))
+        if ! module_is_installed "mod-ale"; then
+            printf "  ${RED}✗ mod-ale (ALE Lua Engine) is not installed.${RST}\n"
+            printf "  ${WHITE}Install via main menu option 1, then configure via option 3.${RST}\n"
+            printf "\n  ${DIM}Press ENTER to return...${RST}\n"
+            read -r _
+            return
         fi
-    done
 
-    # Catch modules NOT in our registry (manually added, or e.g. mod-playerbots)
-    local d dn in_registry
-    for d in "$SERVER_DIR/modules"/*/; do
-        [ -d "$d" ] || continue
-        dn=$(basename "$d")
-        in_registry=false
-        for entry in "${MODULE_REGISTRY[@]}"; do
-            IFS='|' read -r key _ _ _ <<< "$entry"
-            if [ "$key" = "$dn" ]; then
-                in_registry=true
-                break
+        # Build full list with status markers
+        local -a available_entries=()
+        local -a markers=()
+        local entry key name url cloned deployed marker
+
+        for entry in "${ALE_SCRIPT_REGISTRY[@]}"; do
+            IFS='|' read -r key name url <<< "$entry"
+            cloned=false; deployed=false
+            ale_script_is_installed "$key" && cloned=true
+            ale_lua_is_deployed     "$key" && deployed=true
+            if $deployed && $cloned; then
+                marker="${GREEN}✓ Installed${RST}"
+            elif $deployed; then
+                marker="${CYAN}◑ Deployed only${RST}"
+            elif $cloned; then
+                marker="${YELLOW}◐ Cloned only${RST}"
+            else
+                marker="${DIM}○ Not installed${RST}"
             fi
+            available_entries+=("$entry")
+            markers+=("$marker")
         done
-        if [ "$in_registry" = false ]; then
-            local note="(manually added)"
-            [ "$dn" = "mod-playerbots" ] && note="(bundled with Playerbots install)"
-            printf "  ${DIM}%-30s — %s${RST}\n" "$dn" "$note"
-            count=$((count + 1))
-        fi
-    done
 
-    [ "$count" -eq 0 ] && echo "  (none installed)"
-    press_enter
+        local total=${#available_entries[@]}
+
+        # Fixed rows: header + col-header + top-div + bottom-div + help + page-bar = 6
+        local avail=$(( tlines - MENU_START_ROW - 1 ))
+        local page_size=$(( avail - 6 ))
+        [ "$page_size" -lt 3 ] && page_size=3
+
+        local max_start=$(( total - page_size ))
+        [ "$max_start" -lt 0 ] && max_start=0
+        [ "$page_start" -gt "$max_start" ] && page_start=$max_start
+        [ "$page_start" -lt 0 ] && page_start=0
+
+        local page_end=$(( page_start + page_size ))
+        [ "$page_end" -gt "$total" ] && page_end=$total
+        local total_pages=$(( (total + page_size - 1) / page_size ))
+        local current_page=$(( page_start / page_size + 1 ))
+
+        printf "  ${GOLD}── ALE Lua Scripts ──────────────────────────────${RST}\n"
+        printf "  ${DIM}%-4s %-38s %s${RST}\n" "Num" "Script" "Status"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+
+        local idx
+        for (( idx=page_start; idx<page_end; idx++ )); do
+            IFS='|' read -r key name url <<< "${available_entries[$idx]}"
+            printf "  ${WHITE}%2d)${RST} %-38s %b\n" "$(( idx + 1 ))" "$name" "${markers[$idx]}"
+        done
+
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        if [ "$total_pages" -gt 1 ]; then
+            local nav="  ${DIM}Page $current_page/$total_pages${RST}"
+            [ "$current_page" -gt 1 ]              && nav+="   ${WHITE}< prev${RST}"
+            [ "$current_page" -lt "$total_pages" ]  && nav+="   ${WHITE}> next${RST}"
+            printf "%b\n" "$nav"
+        fi
+        printf "  ${WHITE}i<nums>${RST} Install   ${WHITE}r<num>${RST} Remove   ${WHITE}c<num>${RST} Config   ${WHITE}ENTER${RST} Back\n"
+
+        _read_menu_input "$(( tlines - 1 ))"
+        local raw_choice="$_MENU_INPUT"
+
+        [ -z "$raw_choice" ] && return
+
+        local action nums c
+        action="${raw_choice:0:1}"
+        nums="${raw_choice:1}"
+
+        case "${action,,}" in
+            '<')
+                page_start=$(( page_start - page_size ))
+                [ "$page_start" -lt 0 ] && page_start=0
+                ;;
+            '>')
+                page_start=$(( page_start + page_size ))
+                [ "$page_start" -gt "$max_start" ] && page_start=$max_start
+                ;;
+            i)
+                local -a num_tokens=()
+                if [[ "$nums" =~ ^[0-9]+$ ]] && [ "${#nums}" -gt 1 ]; then
+                    local ch
+                    for (( ch=0; ch<${#nums}; ch++ )); do
+                        num_tokens+=("${nums:$ch:1}")
+                    done
+                else
+                    read -r -a num_tokens <<< "$nums"
+                fi
+                local -a to_install=()
+                for c in "${num_tokens[@]}"; do
+                    if [[ "$c" =~ ^[0-9]+$ ]] && \
+                       [ "$c" -ge 1 ] && [ "$c" -le "$total" ]; then
+                        to_install+=("${available_entries[$((c - 1))]}")
+                    fi
+                done
+                if [ "${#to_install[@]}" -eq 0 ]; then
+                    print_warning "No valid script numbers — e.g. i135"
+                    press_enter; continue
+                fi
+                for entry in "${to_install[@]}"; do
+                    IFS='|' read -r key name url <<< "$entry"
+                    ale_script_install "$key" "$name" "$url" || true
+                    echo ""
+                done
+                press_enter
+                ;;
+            r)
+                local rnum; rnum=$(echo "$nums" | tr -d ' ')
+                if ! [[ "$rnum" =~ ^[0-9]+$ ]] || \
+                   [ "$rnum" -lt 1 ] || [ "$rnum" -gt "$total" ]; then
+                    print_warning "Invalid script number — e.g. r2"
+                    press_enter; continue
+                fi
+                IFS='|' read -r key name url <<< "${available_entries[$((rnum - 1))]}"
+                ale_script_remove "$key" "$name"
+                press_enter
+                ;;
+            c)
+                local cnum; cnum=$(echo "$nums" | tr -d ' ')
+                if ! [[ "$cnum" =~ ^[0-9]+$ ]] || \
+                   [ "$cnum" -lt 1 ] || [ "$cnum" -gt "$total" ]; then
+                    print_warning "Invalid script number — e.g. c5"
+                    press_enter; continue
+                fi
+                IFS='|' read -r key name url <<< "${available_entries[$((cnum - 1))]}"
+                case "$key" in
+                    battlepass) configure_ale_battlepass ;;
+                    paragon)    configure_ale_paragon ;;
+                    bmah)       configure_ale_bmah ;;
+                    *) print_info "No dedicated reconfigure for $name." ;;
+                esac
+                press_enter
+                ;;
+            *)
+                print_warning "Unknown command. Use i<nums>, r<num>, c<num>, or ENTER."
+                press_enter
+                ;;
+        esac
+    done
+}
+
+# ─────────────────────────────────────────────────────────────
+# MAIN MENUS
+# ─────────────────────────────────────────────────────────────
+
+# ── Unified module browser ────────────────────────────────────
+# i <nums>  Install one or more (space-separated)
+# r <num>   Remove one
+# ENTER     Return to main menu
+menu_modules() {
+    local page_start=0
+    while true; do
+        local tlines; tlines=$(tput lines 2>/dev/null || echo 24)
+
+        # Build full registry list (always done fresh for current status)
+        local -a available_entries=()
+        local -a markers=()
+        local entry key name url sql_dirs marker
+
+        for entry in "${MODULE_REGISTRY[@]}"; do
+            IFS='|' read -r key name url sql_dirs <<< "$entry"
+            if module_is_installed "$key"; then
+                marker="${GREEN}✓ Installed${RST}"
+            else
+                marker="${DIM}○ Not installed${RST}"
+            fi
+            available_entries+=("$entry")
+            markers+=("$marker")
+        done
+
+        local total=${#available_entries[@]}
+
+        # Collect unregistered modules (read-only info section)
+        local -a other_modules=()
+        local -a other_notes=()
+        if [ -d "$SERVER_DIR/modules" ]; then
+            local d dn in_registry
+            for d in "$SERVER_DIR/modules"/*/; do
+                [ -d "$d" ] || continue
+                dn=$(basename "$d")
+                in_registry=false
+                for entry in "${MODULE_REGISTRY[@]}"; do
+                    IFS='|' read -r key _ _ _ <<< "$entry"
+                    [ "$key" = "$dn" ] && { in_registry=true; break; }
+                done
+                if [ "$in_registry" = false ]; then
+                    local note="manually added"
+                    [ "$dn" = "mod-playerbots" ] && note="bundled"
+                    other_modules+=("$dn")
+                    other_notes+=("$note")
+                fi
+            done
+        fi
+
+        # Fixed rows: header(1) + col-header(1) + top-div(1) + bottom-div(1) + help(1) + page-bar(1) = 6
+        # Reserve extra rows for "other" section if present: divider(1) + label(1) + items
+        local other_count=${#other_modules[@]}
+        local other_rows=$(( other_count > 0 ? other_count + 2 : 0 ))
+        local avail=$(( tlines - MENU_START_ROW - 1 ))
+        local page_size=$(( avail - 6 - other_rows ))
+        [ "$page_size" -lt 3 ] && page_size=3
+        # If "other" section doesn't fit, drop it from the calculation
+        if [ "$page_size" -lt 3 ]; then
+            other_rows=0
+            page_size=$(( avail - 6 ))
+            [ "$page_size" -lt 3 ] && page_size=3
+        fi
+
+        local max_start=$(( total - page_size ))
+        [ "$max_start" -lt 0 ] && max_start=0
+        [ "$page_start" -gt "$max_start" ] && page_start=$max_start
+        [ "$page_start" -lt 0 ] && page_start=0
+
+        local page_end=$(( page_start + page_size ))
+        [ "$page_end" -gt "$total" ] && page_end=$total
+        local total_pages=$(( (total + page_size - 1) / page_size ))
+        local current_page=$(( page_start / page_size + 1 ))
+
+        # Clear and draw
+        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+        printf "  ${GOLD}── Modules ──────────────────────────────────────${RST}\n"
+        printf "  ${DIM}%-4s %-42s %s${RST}\n" "Num" "Module" "Status"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+
+        local idx
+        for (( idx=page_start; idx<page_end; idx++ )); do
+            IFS='|' read -r key name url sql_dirs <<< "${available_entries[$idx]}"
+            printf "  ${WHITE}%2d)${RST} %-42s %b\n" "$(( idx + 1 ))" "$name" "${markers[$idx]}"
+        done
+
+        # Show unregistered modules if space allows
+        if [ "$other_rows" -gt 0 ] && [ "${#other_modules[@]}" -gt 0 ]; then
+            printf "  ${DIM}──────────────────────────────────────────────────${RST}\n"
+            printf "  ${DIM}Other installed:${RST}\n"
+            local oi
+            for (( oi=0; oi<${#other_modules[@]}; oi++ )); do
+                printf "  ${DIM}     %-42s (%s)${RST}\n" "${other_modules[$oi]}" "${other_notes[$oi]}"
+            done
+        fi
+
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        if [ "$total_pages" -gt 1 ]; then
+            local nav="  ${DIM}Page $current_page/$total_pages${RST}"
+            [ "$current_page" -gt 1 ]              && nav+="   ${WHITE}< prev${RST}"
+            [ "$current_page" -lt "$total_pages" ]  && nav+="   ${WHITE}> next${RST}"
+            printf "%b\n" "$nav"
+        fi
+        printf "  ${WHITE}i <nums>${RST} Install   ${WHITE}r <num>${RST} Remove   ${WHITE}ENTER${RST} Back\n"
+
+        _read_menu_input "$(( tlines - 1 ))"
+        local raw_choice="$_MENU_INPUT"
+
+        [ -z "$raw_choice" ] && return
+
+        local action nums
+        action="${raw_choice:0:1}"
+        nums="${raw_choice:1}"
+        nums="${nums# }"
+
+        case "${action,,}" in
+            '<')
+                page_start=$(( page_start - page_size ))
+                [ "$page_start" -lt 0 ] && page_start=0
+                ;;
+            '>')
+                page_start=$(( page_start + page_size ))
+                [ "$page_start" -gt "$max_start" ] && page_start=$max_start
+                ;;
+            i)
+                if [ -z "$nums" ]; then
+                    print_warning "Specify numbers — e.g. i 1 3"
+                    press_enter; continue
+                fi
+
+                if [ "$SERVER_TYPE" != "playerbots" ]; then
+                    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                    print_warning "Module installs on $SERVER_NAME are experimental."
+                    print_info "Modules will be cloned but rebuilding is not supported on this install type."
+                    print_info "Recommended: reinstall as Playerbots for full module support."
+                    echo ""
+                    if ! ask_yes_no "Continue anyway?"; then continue; fi
+                fi
+
+                local -a to_install=()
+                local c
+                for c in $nums; do
+                    if [[ "$c" =~ ^[0-9]+$ ]] && \
+                       [ "$c" -ge 1 ] && [ "$c" -le "$total" ]; then
+                        to_install+=("${available_entries[$((c - 1))]}")
+                    fi
+                done
+
+                if [ "${#to_install[@]}" -eq 0 ]; then
+                    print_warning "No valid module numbers — e.g. i 1 3"
+                    press_enter; continue
+                fi
+
+                printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                for entry in "${to_install[@]}"; do
+                    IFS='|' read -r key name url sql_dirs <<< "$entry"
+                    module_install "$key" "$name" "$url" "$sql_dirs" || true
+                    echo ""
+                done
+                print_info "Modules cloned and SQL imported."
+
+                if [ "$SERVER_TYPE" = "playerbots" ]; then
+                    print_info "Rebuild the worldserver to compile the new modules in."
+                    echo ""
+                    if ask_yes_no "Rebuild the worldserver now?"; then
+                        rebuild_worldserver
+                    fi
+                else
+                    print_info "(Skipping rebuild — not supported on this install type.)"
+                fi
+
+                for entry in "${to_install[@]}"; do
+                    IFS='|' read -r key name _ _ <<< "$entry"
+                    if [ "$key" = "mod-ah-bot" ]; then
+                        echo ""
+                        print_info "AH Bot installed — configure a bot character?"
+                        if ask_yes_no "Configure AH Bot now?"; then configure_ahbot; fi
+                    fi
+                    if [ "$key" = "mod-ale" ]; then
+                        echo ""
+                        print_info "ALE requires post-install setup (lua_scripts dir + conf)."
+                        if ask_yes_no "Configure ALE now?"; then configure_ale; fi
+                    fi
+                done
+                press_enter
+                ;;
+            r)
+                local rnum; rnum=$(echo "$nums" | tr -d ' ')
+                if ! [[ "$rnum" =~ ^[0-9]+$ ]] || \
+                   [ "$rnum" -lt 1 ] || [ "$rnum" -gt "$total" ]; then
+                    print_warning "Invalid module number — e.g. r2"
+                    press_enter; continue
+                fi
+                IFS='|' read -r key name _ _ <<< "${available_entries[$((rnum - 1))]}"
+                if ! module_is_installed "$key"; then
+                    print_warning "$name is not installed."
+                    press_enter; continue
+                fi
+                printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                module_remove "$key" "$name"
+                if [ "$SERVER_TYPE" = "playerbots" ]; then
+                    echo ""
+                    print_info "Rebuild needed for module removal to take effect."
+                    if ask_yes_no "Rebuild the worldserver now?"; then
+                        rebuild_worldserver
+                    fi
+                fi
+                press_enter
+                ;;
+            *)
+                print_warning "Unknown command. Use i <nums>, r <num>, or ENTER."
+                press_enter
+                ;;
+        esac
+    done
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -1267,11 +2230,14 @@ menu_list() {
 # and that the manager doesn't run anything destructive without asking.
 show_first_run_welcome() {
     local marker="$SERVER_DIR/.dml-manager-seen"
-    # Returning user: just pause briefly so detection feedback is readable
+    # Returning user: clear the detect_install output and go straight to the menu
     if [ -f "$marker" ]; then
-        press_enter
+        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
         return 0
     fi
+
+    # New user — show the full welcome screen (use whole alt-screen, no logo)
+    printf '\033[r\033[H\033[2J\033[?25h'
 
     # Detect "this looks fresh" — user-installed modules count.
     # mod-playerbots is bundled with the install so doesn't count.
@@ -1286,7 +2252,6 @@ show_first_run_welcome() {
         done
     fi
 
-    clear
     echo ""
     echo -e "${GOLD}╔══════════════════════════════════════════════════╗${RST}"
     echo -e "${GOLD}║${WHITE}${BOLD}    👋  Welcome to the WoW Module Manager        ${RST}${GOLD}║${RST}"
@@ -1305,9 +2270,8 @@ show_first_run_welcome() {
     echo -e "${WHITE}${BOLD}A few things to know:${RST}"
     echo ""
     echo -e "${GREEN}  ✓${RST} ${WHITE}Nothing changes until you explicitly choose an action.${RST}"
-    echo -e "${WHITE}    The menu options 3 (List modules), 6 (Server status),${RST}"
-    echo -e "${WHITE}    and 10 (View logs) are completely read-only — safe to${RST}"
-    echo -e "${WHITE}    poke around and see what your install looks like.${RST}"
+    echo -e "${WHITE}    Option 6 (Server status) and 10 (View logs) are read-only${RST}"
+    echo -e "${WHITE}    — safe to poke around and see what your install looks like.${RST}"
     echo ""
     echo -e "${GREEN}  ✓${RST} ${WHITE}You'll be asked before anything destructive.${RST}"
     echo -e "${WHITE}    Adding/removing modules, rebuilding the worldserver, and${RST}"
@@ -1323,11 +2287,10 @@ show_first_run_welcome() {
     if [ "$user_module_count" -eq 0 ]; then
         echo -e "${WHITE}${BOLD}Suggested first steps for a fresh install:${RST}"
         echo -e "${WHITE}  1. Option ${CYAN}6${WHITE} (Server status) — see what containers are running${RST}"
-        echo -e "${WHITE}  2. Option ${CYAN}3${WHITE} (List modules) — see what's installed${RST}"
-        echo -e "${WHITE}  3. When ready: option ${CYAN}1${WHITE} (Add modules) — add AH Bot, etc.${RST}"
+        echo -e "${WHITE}  2. Option ${CYAN}1${WHITE} (Modules) — browse and install modules${RST}"
     else
         echo -e "${WHITE}${BOLD}Useful options for an existing install:${RST}"
-        echo -e "${WHITE}  • Option ${CYAN}3${WHITE} (List modules) — see what's already installed${RST}"
+        echo -e "${WHITE}  • Option ${CYAN}1${WHITE} (Modules) — browse installed and available modules${RST}"
         echo -e "${WHITE}  • Option ${CYAN}6${WHITE} (Server status) — check container state${RST}"
         echo -e "${WHITE}  • Option ${CYAN}12${WHITE} (Repair) — if ac-db-import is failing${RST}"
     fi
@@ -1339,62 +2302,68 @@ show_first_run_welcome() {
 
     # Drop the marker — silent failure is OK, the welcome just shows again next time
     touch "$marker" 2>/dev/null || true
+    # Restore static logo now that the welcome screen is done
+    _setup_screen
+    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
 }
 
 main_menu() {
     while true; do
-        print_header
-        echo -e "${WHITE}Server: ${CYAN}$SERVER_DIR${RST}"
-        echo -e "${WHITE}Type:   ${CYAN}$SERVER_NAME${RST}"
-
-        # Quick running indicator
         refresh_container_names
+        local state_str build_str
         if container_running "$WORLD_CONTAINER"; then
-            echo -e "${WHITE}State:  ${GREEN}● Running${RST}"
+            state_str="${GREEN}● Running${RST}"
         else
-            echo -e "${WHITE}State:  ${DIM}○ Stopped${RST}"
+            state_str="${DIM}○ Stopped${RST}"
+        fi
+        if [ "$SERVER_TYPE" = "playerbots" ]; then
+            build_str="${GREEN}source${RST}"
+        else
+            build_str="${YELLOW}prebuilt${RST}"
         fi
 
-        if [ "$SERVER_TYPE" = "playerbots" ]; then
-            echo -e "${WHITE}Build:  ${GREEN}source (modules fully supported)${RST}"
-        else
-            echo -e "${WHITE}Build:  ${YELLOW}prebuilt (modules experimental)${RST}"
-        fi
-        echo ""
-        echo -e "  ${GOLD}── Modules ──${RST}"
-        echo -e "${WHITE}    1) Add modules${RST}"
-        echo -e "${WHITE}    2) Remove modules${RST}"
-        echo -e "${WHITE}    3) List installed modules${RST}"
-        echo -e "${WHITE}    4) Configure / reconfigure AH Bot${RST}"
-        echo -e "${WHITE}    5) Rebuild worldserver${RST}"
-        echo ""
-        echo -e "  ${GOLD}── Server Controls ──${RST}"
-        echo -e "${WHITE}    6) Server status${RST}"
-        echo -e "${WHITE}    7) Start server${RST}"
-        echo -e "${WHITE}    8) Stop server${RST}"
-        echo -e "${WHITE}    9) Restart server${RST}"
-        echo -e "${WHITE}   10) View worldserver logs${RST}"
-        echo -e "${WHITE}   11) Attach to worldserver console${RST}"
-        echo ""
-        echo -e "  ${GOLD}── Troubleshooting ──${RST}"
-        echo -e "${WHITE}   12) Repair install state (clear stuck SQL update tracking)${RST}"
-        echo ""
-        echo -e "${WHITE}    Q) Quit${RST}"
-        echo ""
-        printf "${WHITE}Choice: ${RST}"
-        read -r choice
-        case "${choice,,}" in
-            1)  menu_add ;;
-            2)  menu_remove ;;
-            3)  menu_list ;;
-            4)  configure_ahbot; press_enter ;;
+        # Clear from menu area downward, then print single-column menu
+        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+
+        printf "  ${WHITE}Server:${RST} ${CYAN}%s${RST}  ${GOLD}✦${RST}  ${WHITE}State:${RST} %b  ${GOLD}✦${RST}  ${WHITE}Build:${RST} %b\n" \
+            "$(basename "$SERVER_DIR")" "$state_str" "$build_str"
+        printf "\n  ${GOLD}${BOLD}Server Modifications${RST}\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${WHITE}1)${RST} Manage Modules\n"
+        printf "  ${WHITE}2)${RST} Manage ALE Lua\n"
+        printf "  ${WHITE}3)${RST} Configure AH Bot\n"
+        printf "  ${WHITE}4)${RST} Configure ALE\n"
+        printf "  ${WHITE}5)${RST} Rebuild worldserver\n"
+        printf "\n  ${GOLD}${BOLD}Server Controls${RST}\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${WHITE}6)${RST} Server status\n"
+        printf "  ${WHITE}7)${RST} Start server\n"
+        printf "  ${WHITE}8)${RST} Stop server\n"
+        printf "  ${WHITE}9)${RST} Restart server\n"
+        printf "  ${WHITE}10)${RST} View logs\n"
+        printf "  ${WHITE}11)${RST} Attach to console\n"
+        printf "  ${WHITE}12)${RST} Repair install state\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${GOLD} Q)${RST} Quit\n"
+
+        # Input at second-to-last terminal row so it's always visible
+        local _tlines; _tlines=$(tput lines 2>/dev/null || echo 24)
+        local _irow=$(( _tlines - 1 ))
+        _read_menu_input "$_irow"
+        local choice="${_MENU_INPUT,,}"
+
+        case "$choice" in
+            1)  menu_modules ;;
+            2)  menu_ale_scripts ;;
+            3)  configure_ahbot; press_enter ;;
+            4)  configure_ale; press_enter ;;
             5)  rebuild_worldserver; press_enter ;;
             6)  server_status; press_enter ;;
             7)  server_start; press_enter ;;
             8)  server_stop; press_enter ;;
             9)  server_restart; press_enter ;;
-            10) server_logs ;;
-            11) server_attach; press_enter ;;
+            10) with_full_screen server_logs ;;
+            11) with_full_screen server_attach ;;
             12) repair_install_state; press_enter ;;
             q)  echo ""; print_info "Goodbye!"; exit 0 ;;
         esac
@@ -1404,7 +2373,7 @@ main_menu() {
 # ─────────────────────────────────────────────────────────────
 # ENTRYPOINT
 # ─────────────────────────────────────────────────────────────
-print_header
+start_logo_animation
 detect_install
 show_first_run_welcome
 main_menu
