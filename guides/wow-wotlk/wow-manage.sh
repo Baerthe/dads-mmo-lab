@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
 #  Dad's MMO Lab — WoW Module Manager
-#  manage-wow-modules.sh
+#  wow-manage.sh
 #
 #  Post-install management for AzerothCore WoW servers:
 #    - Add/remove modules (AH Bot, Solocraft, Transmog, etc.)
@@ -20,8 +20,8 @@
 #  is EXPERIMENTAL and clearly marked.
 #
 #  Usage:
-#    chmod +x manage-wow-modules.sh
-#    ./manage-wow-modules.sh
+#    chmod +x wow-manage.sh
+#    ./wow-manage.sh
 #
 #  https://github.com/DadsMmoLab/dads-mmo-lab
 # ============================================================
@@ -36,22 +36,20 @@ BLUE='\033[0;34m'; WHITE='\033[1;37m'; CYAN='\033[0;36m'
 GOLD='\033[38;5;220m'; DIM='\033[2m'
 
 # ─────────────────────────────────────────────────────────────
-# UI HELPERS
+# SCREEN SETUP & UI HELPERS
 # ─────────────────────────────────────────────────────────────
-# ─────────────────────────────────────────────────────────────
-# LOGO & SCREEN SETUP
-# ─────────────────────────────────────────────────────────────
-# Layout (1-indexed rows):
-#   Row  1    : blank
-#   Rows 2-9  : 8 logo lines  (animated during intro, static thereafter)
-#   Row  10   : blank
-#   Row  11   : separator bar
-#   Row  12   : "WoW Module Manager  ✦  vX.Y.Z"
-#   Row  13   : separator bar
-#   Row  14   : blank
-#   Row  15+  : menu content
+# Layout modes (1-indexed rows):
+#
+#   Full-logo mode  (_IN_MENU=false, e.g. intro / first-run):
+#     Rows 1–9  : 8-line logo + animation   →  MENU_START_ROW=15
+#
+#   Slim-banner mode  (_IN_MENU=true, i.e. any menu screen):
+#     Rows 1–4  : 4-row compact banner      →  MENU_START_ROW=5
+#
+#   Narrow-fallback mode  (terminal width < 80 cols):
+#     Rows 1–5  : minimal header            →  MENU_START_ROW=6
+#
 MENU_START_ROW=15
-MENU_INPUT_ROW=24
 _TERM_LINES=24
 _TERM_COLS=80
 _RESIZE_NEEDED=false
@@ -141,7 +139,71 @@ _read_menu_input() {
     _MENU_INPUT=""
     printf '\033[%d;3H\033[K' "$_input_row"
     printf "${WHITE}Choice: ${RST}"
-    read -r _MENU_INPUT || { [ -z "$_MENU_INPUT" ] && return 2; }
+    read -r _MENU_INPUT
+    local _rc=$?
+    if [ $_rc -ne 0 ]; then
+        # SIGWINCH interrupts read and sets _RESIZE_NEEDED=true — that is a resize event.
+        # Anything else (Ctrl-D, closed stdin) is treated as EOF → callers should exit.
+        [ "$_RESIZE_NEEDED" = true ] && return 2   # resize — caller should continue/redraw
+        return 3                                    # EOF / broken stdin — caller should exit
+    fi
+}
+
+_PARSED_INDEX=""
+_parse_single_index() {
+    local raw="$1" max="$2"
+    # Allow surrounding whitespace but reject embedded spaces (e.g. "1 2" must not become "12").
+    if ! [[ "$raw" =~ ^[[:space:]]*([0-9]+)[[:space:]]*$ ]]; then
+        return 1
+    fi
+    local idx="${BASH_REMATCH[1]}"
+    if [ "$idx" -lt 1 ] || [ "$idx" -gt "$max" ]; then
+        return 1
+    fi
+    _PARSED_INDEX="$idx"
+}
+
+# Keep only the $3 (default: 2) most-recent routine backup files matching glob
+# $2 inside directory $1.  Safety/pre-restore backups (names containing
+# "_pre_restore_") are never touched.
+_prune_backup_files() {
+    local dir="$1" pattern="$2" keep="${3:-2}"
+    local -a files=()
+    while IFS= read -r f; do
+        [[ "$(basename "$f")" == *_pre_restore_* ]] && continue
+        files+=("$f")
+    done < <(ls -t "$dir"/$pattern 2>/dev/null)
+    local i
+    for (( i=keep; i<${#files[@]}; i++ )); do
+        rm -f "${files[$i]}"
+    done
+}
+
+# Returns 0 if running on a Steam Deck (SteamOS).
+_is_steam_deck() {
+    grep -qi 'ID.*steamos\|ID_LIKE.*steamos' /etc/os-release 2>/dev/null
+}
+
+# Open a text file for editing.
+# On Steam Deck: nano has no Ctrl key to exit, so show the path and offer Kate.
+# Elsewhere: open nano directly.
+_open_text_file() {
+    local filepath="$1"
+    if _is_steam_deck; then
+        echo ""
+        print_info "File location:"
+        echo -e "  ${CYAN}${filepath}${RST}"
+        echo ""
+        if command -v kate &>/dev/null; then
+            if ask_yes_no "Open in Kate (graphical text editor)?"; then
+                kate "$filepath" &>/dev/null &
+            fi
+        else
+            print_info "Open this file with your preferred text editor."
+        fi
+    else
+        nano "$filepath"
+    fi
 }
 
 _screen_int_handler() {
@@ -150,6 +212,12 @@ _screen_int_handler() {
         exit 0
     fi
     # Inside with_full_screen: SIGINT already killed the foreground child — just return
+}
+
+_screen_term_handler() {
+    # SIGTERM always restores the terminal and exits cleanly.
+    printf '\033[r\033[?1049l\033[?25h'
+    exit 0
 }
 
 # Draw the logo + subtitle bar statically (full clear + redraw).
@@ -215,7 +283,8 @@ _setup_screen() {
 start_logo_animation() {
     _setup_screen
     trap 'tput smam 2>/dev/null || true; printf "\033[r\033[?1049l\033[?25h"' EXIT
-    trap '_screen_int_handler' INT TERM
+    trap '_screen_int_handler' INT
+    trap '_screen_term_handler' TERM
     trap '_handle_resize' WINCH
 
     # Start animation subprocess
@@ -234,7 +303,7 @@ start_logo_animation() {
     printf '\033[?25l'
     _draw_logo_static
     printf '\033[?25h'
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
 }
 
 # Clear screen, run a function, restore the static logo + scroll region.
@@ -248,7 +317,7 @@ with_full_screen() {
     trap '_handle_resize' WINCH
     _ALLOW_INT_EXIT=true
     _setup_screen
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
 }
 
 print_header() {
@@ -257,8 +326,8 @@ print_header() {
 }
 
 print_step()    { echo ""; echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
-                   echo -e "${WHITE}${BOLD} $1${RST}"
-                   echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"; }
+                    echo -e "${WHITE}${BOLD} $1${RST}"
+                    echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"; }
 print_success() { echo -e "${GREEN}✅ $1${RST}"; }
 print_warning() { echo -e "${YELLOW}⚠️  $1${RST}"; }
 print_error()   { echo -e "${RED}❌ $1${RST}"; }
@@ -486,26 +555,27 @@ _cmd_block_for() {
         battlepass)
             printf '%s\n' \
                 'Battle Pass (ALE)' \
-                'A seasonal challenge/reward system. Players complete tasks to earn points and claim rewards. Admins manage seasons and reward pools. Requires the Battle Pass Ticker NPC (entry 90100) placed in the world.' \
+                'A complete seasonal XP progression system. Players earn XP from kills, quests,' \
+                'PvP, dungeons, and daily logins, then claim rewards (items, gold, titles, spells).' \
+                'Requires the Battle Pass NPC (entry 90100) placed in the world and the client' \
+                'addon installed in WoW Interface/AddOns/BattlePass/.' \
                 '' \
                 'Commands:' \
-                '.bp status               — View your current Battle Pass progress' \
-                '.bp rewards              — List available rewards this season' \
-                '.bp claim <n>            — Claim reward number n' \
+                '.bp                      — Show your current Battle Pass progress' \
+                '.bp rewards              — List available rewards' \
+                '.bp claim <level>        — Claim reward for a specific level' \
                 '.bp claimall             — Claim all currently available rewards' \
-                '.bp preview              — Preview upcoming rewards' \
-                '.bp help                 — Show Battle Pass command help' \
-                '[GM] .bpadmin season start  — Start a new Battle Pass season' \
-                '[GM] .bpadmin season end    — End the current season' \
-                '[GM] .bpadmin season list   — List all seasons' \
-                '[GM] .bpadmin reward add    — Add a reward to the current season' \
-                '[GM] .bpadmin reward list   — List rewards for the current season' \
-                '[GM] .bpadmin player list   — List player progress for the current season' \
-                '[GM] .bpadmin help          — Show admin command help' \
+                '.bp preview [level]      — Preview upcoming rewards' \
+                '[GM] .bpadmin addxp <amount> [player]   — Grant XP to a player' \
+                '[GM] .bpadmin setlevel <level> [player] — Set a player'"'"'s level' \
+                '[GM] .bpadmin unclaim <level> [player]  — Un-claim a reward' \
+                '[GM] .bpadmin reset [player]            — Reset a player'"'"'s progress' \
+                '[GM] .bpadmin reload                    — Reload Battle Pass config' \
+                '[GM] .bpadmin stats                     — Show server-wide stats' \
                 '' \
                 'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
-                'npc add 90100 0 -8819.3 636.2 94.1 3.7   — Battle Pass Ticker, Stormwind (Alliance)' \
-                'npc add 90100 1 1609.2 -4407.7 17.5 4.5  — Battle Pass Ticker, Orgrimmar (Horde)'
+                'npc add 90100 0 -8819.3 636.2 94.1 3.7   — Battle Pass NPC, Stormwind (Alliance)' \
+                'npc add 90100 1 1609.2 -4407.7 17.5 4.5  — Battle Pass NPC, Orgrimmar (Horde)'
             ;;
         paragon)
             printf '%s\n' \
@@ -828,7 +898,7 @@ remove_mod_commands() {
 # Print INGAME_COMMANDS_FILE to the terminal with basic colour formatting.
 show_ingame_commands() {
     local outfile="$INGAME_COMMANDS_FILE"
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
     if [ -z "$outfile" ] || [ ! -f "$outfile" ] || [ ! -s "$outfile" ]; then
         echo ""
         print_info "No in-game commands recorded yet."
@@ -838,7 +908,22 @@ show_ingame_commands() {
         return
     fi
 
-    with_full_screen nano "$outfile"
+    if _is_steam_deck; then
+        echo ""
+        print_info "In-game commands file:"
+        echo -e "  ${CYAN}${outfile}${RST}"
+        echo ""
+        if command -v kate &>/dev/null; then
+            if ask_yes_no "Open in Kate (graphical text editor)?"; then
+                kate "$outfile" &>/dev/null &
+            fi
+        else
+            print_info "Open this file with your preferred text editor."
+        fi
+        press_enter
+    else
+        with_full_screen nano "$outfile"
+    fi
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -922,8 +1007,8 @@ detect_install() {
             printf "${WHITE}Choose [1-%d]: ${RST}" "${#found_dirs[@]}"
             read -r choice
             if [[ "$choice" =~ ^[0-9]+$ ]] && \
-               [ "$choice" -ge 1 ] && \
-               [ "$choice" -le "${#found_dirs[@]}" ]; then
+                [ "$choice" -ge 1 ] && \
+                [ "$choice" -le "${#found_dirs[@]}" ]; then
                 SERVER_DIR="${found_dirs[$((choice - 1))]}"
                 break
             fi
@@ -972,14 +1057,14 @@ detect_type_for() {
     # For dirs not named with a suffix, peek at the compose / override
     # for telltale strings.
     if [ -f "$d/docker-compose.override.yml" ] && \
-       grep -qi "playerbot\|AC_AI_PLAYERBOT" "$d/docker-compose.override.yml" 2>/dev/null; then
+        grep -qi "playerbot\|AC_AI_PLAYERBOT" "$d/docker-compose.override.yml" 2>/dev/null; then
         echo "playerbots"; return
     fi
     if [ -d "$d/modules/mod-playerbots" ]; then
         echo "playerbots"; return
     fi
     if [ -d "$d/data/sql/custom/db_world" ] && \
-       ls "$d/data/sql/custom/db_world"/*npcbot* &>/dev/null; then
+        ls "$d/data/sql/custom/db_world"/*npcbot* &>/dev/null; then
         echo "npcbots"; return
     fi
     echo "base"
@@ -1130,7 +1215,7 @@ server_start() {
         echo ""
         # Diagnose the most common failure modes
         if grep -q "didn't complete successfully" "$up_log" 2>/dev/null && \
-           grep -q "ac-db-import" "$up_log" 2>/dev/null; then
+            grep -q "ac-db-import" "$up_log" 2>/dev/null; then
             print_warning "DIAGNOSIS: ac-db-import failed."
             print_info "Check the real error with:"
             print_info "  docker compose logs ac-db-import | tail -50"
@@ -1170,7 +1255,7 @@ server_start() {
     local i
     for i in $(seq 1 18); do
         if docker logs "$WORLD_CONTAINER" 2>&1 | \
-           grep -qiE "World initialized|Loading World|Loading complete"; then
+            grep -qiE "World initialized|Loading World|Loading complete"; then
             print_success "Worldserver is ready! ⚔️"
             return 0
         fi
@@ -1616,8 +1701,8 @@ repair_install_state() {
             ;;
         *)
             if [[ "$choice" =~ ^[0-9]+$ ]] && \
-               [ "$choice" -ge 1 ] && \
-               [ "$choice" -le "${#repair_keys[@]}" ]; then
+                [ "$choice" -ge 1 ] && \
+                [ "$choice" -le "${#repair_keys[@]}" ]; then
                 local idx=$((choice - 1))
                 local db="${repair_dbs[$idx]}"
                 [ -z "$db" ] && db="acore_world"
@@ -1637,20 +1722,7 @@ repair_install_state() {
 # ─────────────────────────────────────────────────────────────
 module_is_installed() {
     local key="$1"
-    [ -d "$SERVER_DIR/modules/$key" ]
-}
-
-# Source-build state — is the worldserver service set up to build from source?
-# For Playerbots, this is ALWAYS true (install-wow sets it up that way).
-# For Base/NPCBots, this is false by default (uses prebuilt image).
-worldserver_is_source_build() {
-    if [ "$SERVER_TYPE" = "playerbots" ]; then
-        return 0
-    fi
-    local override="$SERVER_DIR/docker-compose.override.yml"
-    [ -f "$override" ] && \
-        grep -qE "^\s*build:" "$override" && \
-        grep -qE "ac-worldserver:" "$override"
+    [ -d "$SERVER_DIR/modules/$key/.git" ]
 }
 
 # Clone a module into the install's modules/ directory.
@@ -1676,7 +1748,12 @@ module_install() {
             print_warning "git pull failed — using existing copy"
     else
         mkdir -p "$SERVER_DIR/modules"
+        if [ -d "$SERVER_DIR/modules/$key" ] && [ ! -d "$SERVER_DIR/modules/$key/.git" ]; then
+            print_warning "Removing incomplete clone at modules/$key"
+            rm -rf "$SERVER_DIR/modules/$key"
+        fi
         if ! git clone --depth 1 "$url" "$SERVER_DIR/modules/$key"; then
+            rm -rf "$SERVER_DIR/modules/$key"
             print_error "Clone failed for $name!"
             return 1
         fi
@@ -1985,7 +2062,7 @@ configure_module_challenge_modes() {
 
     print_info "⚠  Challenge Modes requires  EnablePlayerSettings = 1  in worldserver.conf."
     echo ""
-    nano "$conf_dest"
+    _open_text_file "$conf_dest"
     echo ""
     print_info "Restart the worldserver for conf changes to take effect."
 }
@@ -2022,7 +2099,7 @@ configure_module_bot_level_brackets() {
 
     print_info "⚠  Bot Level Brackets requires the Playerbots module to function."
     echo ""
-    nano "$conf_dest"
+    _open_text_file "$conf_dest"
     echo ""
     print_info "Restart the worldserver for conf changes to take effect."
 }
@@ -2060,8 +2137,9 @@ configure_module_npc_beastmaster() {
     print_info "Tip: Add 601026 to Creatures.CustomIDs in worldserver.conf to suppress"
     print_info "     a harmless gossip-menu warning in server logs."
     echo ""
-    nano "$conf_dest"
+    _open_text_file "$conf_dest"
     echo ""
+    print_info "You must enable non-hunters in the conf to allow other classes to get pets."
     print_info "Restart the worldserver for conf changes to take effect."
 }
 
@@ -2085,20 +2163,20 @@ ale_lua_is_deployed() {
     lua_dir=$(ale_lua_scripts_dir)
     case "$key" in
         accountwide)   [ -d "$lua_dir/accountwide" ] && \
-                       ls "$lua_dir/accountwide"/*.lua &>/dev/null ;;
+                        ls "$lua_dir/accountwide"/*.lua &>/dev/null ;;
         levelupreward) ls "$lua_dir"/LevelUpReward*.lua &>/dev/null 2>&1 || \
-                       ls "$lua_dir"/levelup*.lua &>/dev/null 2>&1 || \
-                       ls "$lua_dir"/LevelUp*.lua &>/dev/null 2>&1 ;;
+                        ls "$lua_dir"/levelup*.lua &>/dev/null 2>&1 || \
+                        ls "$lua_dir"/LevelUp*.lua &>/dev/null 2>&1 ;;
         exchangenpc)   ls "$lua_dir"/Exchange*.lua &>/dev/null 2>&1 || \
-                       ls "$lua_dir"/exchange*.lua &>/dev/null 2>&1 ;;
+                        ls "$lua_dir"/exchange*.lua &>/dev/null 2>&1 ;;
         activechat)    [ -d "$lua_dir/activechat" ] ;;
         battlepass)    [ -d "$lua_dir/battlepass" ] ;;
         paragon)       [ -d "$lua_dir/paragon" ] ;;
         bmah)          [ -f "$lua_dir/bmah_server.lua" ] ;;
         lootpet)       [ -f "$lua_dir/LootPet.lua" ] ;;
         sod)           ls "$lua_dir"/sod*.lua &>/dev/null 2>&1 || \
-                       ls "$lua_dir"/SoD*.lua &>/dev/null 2>&1 || \
-                       ls "$lua_dir"/season*.lua &>/dev/null 2>&1 ;;
+                        ls "$lua_dir"/SoD*.lua &>/dev/null 2>&1 || \
+                        ls "$lua_dir"/season*.lua &>/dev/null 2>&1 ;;
         sitmeanrest)   [ -f "$lua_dir/SitMeansRest.lua" ] ;;
         unlimitedammo) [ -f "$lua_dir/UnlimitedAmmo.lua" ] ;;
         *)             false ;;
@@ -2168,20 +2246,41 @@ configure_ale_battlepass() {
         echo ""
         print_info "Configure Battle Pass settings (press ENTER to keep defaults):"
         echo ""
-        local max_level exp_per_level debug_mode
-        printf "${WHITE}  Max Battle Pass level     [100]: ${RST}"; read -r max_level
-        printf "${WHITE}  Base XP required per level [1000]: ${RST}"; read -r exp_per_level
-        printf "${WHITE}  Enable debug logging  (0=off/1=on) [0]: ${RST}"; read -r debug_mode
+        local enabled max_level exp_per_level exp_scaling npc_entry debug_mode
+        printf "${WHITE}  Enable Battle Pass        (1=on/0=off) [1]: ${RST}"; read -r enabled
+        printf "${WHITE}  Max Battle Pass level               [100]: ${RST}"; read -r max_level
+        printf "${WHITE}  Base XP required per level         [1000]: ${RST}"; read -r exp_per_level
+        printf "${WHITE}  XP scaling factor per level         [1.1]: ${RST}"; read -r exp_scaling
+        printf "${WHITE}  Battle Pass NPC entry ID          [90100]: ${RST}"; read -r npc_entry
+        printf "${WHITE}  Enable debug logging    (0=off/1=on)  [0]: ${RST}"; read -r debug_mode
+        enabled=${enabled:-1}
         max_level=${max_level:-100}
         exp_per_level=${exp_per_level:-1000}
+        exp_scaling=${exp_scaling:-1.1}
+        npc_entry=${npc_entry:-90100}
         debug_mode=${debug_mode:-0}
 
         if docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
-            -e "UPDATE battlepass_config SET value='$max_level'    WHERE \`key\`='max_level';
+            -e "UPDATE battlepass_config SET value='$enabled'       WHERE \`key\`='enabled';
+                UPDATE battlepass_config SET value='$max_level'     WHERE \`key\`='max_level';
                 UPDATE battlepass_config SET value='$exp_per_level' WHERE \`key\`='exp_per_level';
-                UPDATE battlepass_config SET value='$debug_mode'   WHERE \`key\`='debug_mode';" \
+                UPDATE battlepass_config SET value='$exp_scaling'   WHERE \`key\`='exp_scaling';
+                UPDATE battlepass_config SET value='$npc_entry'     WHERE \`key\`='npc_entry';
+                UPDATE battlepass_config SET value='$debug_mode'    WHERE \`key\`='debug_mode';" \
             2>/dev/null; then
-            print_success "Battle Pass config applied."
+            # UPDATE succeeds even when 0 rows match (older schema missing some keys).
+            # Verify all 6 keys are actually present in the table.
+            local found_keys
+            found_keys=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
+                -sN -e "SELECT COUNT(*) FROM battlepass_config WHERE \`key\` IN \
+                        ('enabled','max_level','exp_per_level','exp_scaling','npc_entry','debug_mode');" \
+                2>/dev/null)
+            if [ "${found_keys:-0}" -ge 6 ]; then
+                print_success "Battle Pass config applied (all 6 keys updated)."
+            else
+                print_warning "Only ${found_keys:-0}/6 config keys were found in battlepass_config."
+                print_info "The table may be from an older install. Re-run the SQL files, then reconfigure."
+            fi
         else
             print_warning "Config update failed — the battlepass_config table may not exist yet."
             print_info "Run the SQL files above first, then reconfigure via option C."
@@ -2197,8 +2296,9 @@ configure_ale_battlepass() {
     echo -e "  ${CYAN}Source:${RST}      $clone_dir/BattlePass/"
     echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/BattlePass/"
     echo ""
-    echo -e "${WHITE}Use ${CYAN}/bp${WHITE} or ${CYAN}/battlepass${WHITE} in-game to open the Battle Pass frame.${RST}"
-    echo -e "${WHITE}Player commands: ${CYAN}.bp${WHITE} | ${CYAN}.bp rewards${WHITE} | ${CYAN}.bp claim <level>${RST}"
+    echo -e "${WHITE}Use ${CYAN}/bp${WHITE} or ${CYAN}/battlepass${WHITE} in the WoW chat to open the Battle Pass frame.${RST}"
+    echo -e "${WHITE}Server commands: ${CYAN}.bp${WHITE} | ${CYAN}.bp rewards${WHITE} | ${CYAN}.bp claim <level>${WHITE} | ${CYAN}.bp claimall${RST}"
+    echo -e "${WHITE}Admin commands:  ${CYAN}.bpadmin addxp${WHITE} | ${CYAN}.bpadmin setlevel${WHITE} | ${CYAN}.bpadmin reset${WHITE} | ${CYAN}.bpadmin reload${RST}"
 }
 
 configure_ale_paragon() {
@@ -2419,13 +2519,13 @@ configure_ale_bmah() {
     # Parallel arrays — index-aligned (Bash 3 compatible; no associative arrays).
     local -a BNPC_IDS=(   45281   2496  11183   8921   3162  14740  11504  10834)
     local -a BNPC_NAMES=( "Slytter"
-                          "Krazek"
-                          "Dirge Quikcleave"
-                          "Ravenholdt Guards"
-                          "Slyres Notrash"
-                          "Stonard Smuggler"
-                          "Baron Vardus"
-                          "Count Remo" )
+                        "Krazek"
+                        "Dirge Quikcleave"
+                        "Ravenholdt Guards"
+                        "Slyres Notrash"
+                        "Stonard Smuggler"
+                        "Baron Vardus"
+                        "Count Remo" )
 
 
     print_step "Black Market AH — NPC Vendor Configuration"
@@ -2509,7 +2609,7 @@ configure_ale_bmah() {
         local tok
         for tok in $_bsel; do
             if [[ "$tok" =~ ^[0-9]+$ ]] && \
-               [ "$tok" -ge 1 ] && [ "$tok" -le "${#BNPC_IDS[@]}" ]; then
+                [ "$tok" -ge 1 ] && [ "$tok" -le "${#BNPC_IDS[@]}" ]; then
                 sel_ids+=("${BNPC_IDS[$((tok - 1))]}")
                 sel_names+=("${BNPC_NAMES[$((tok - 1))]}")
             else
@@ -2576,11 +2676,7 @@ configure_ale_bmah() {
             return 1
         }
         for id in "${final_ids[@]}"; do
-            label=""
-            for (( j=0; j<${#BNPC_IDS[@]}; j++ )); do
-                [ "${BNPC_IDS[$j]}" = "$id" ] && label=" --${BNPC_NAMES[$j]}" && break
-            done
-            printf "  %s,%s\n" "$id" "$label" >> "$ids_file"
+            printf "  %s,\n" "$id" >> "$ids_file"
         done
 
         # awk replaces the BMAH_VENDOR_NPCs block — handles both inline and
@@ -3028,7 +3124,12 @@ ale_script_install() {
         (cd "$clone_dir" && git pull --depth 1 2>/dev/null) || \
             print_warning "git pull failed — using existing copy"
     else
+        if [ -d "$clone_dir" ] && [ ! -d "$clone_dir/.git" ]; then
+            print_warning "Removing incomplete clone at $clone_dir"
+            rm -rf "$clone_dir"
+        fi
         if ! git clone --depth 1 "$url" "$clone_dir"; then
+            rm -rf "$clone_dir"
             print_error "Clone failed for $name!"
             return 1
         fi
@@ -3198,7 +3299,7 @@ ale_script_remove() {
     case "$key" in
         accountwide) deployed_hint="$lua_dir/accountwide/" ;;
         activechat)  deployed_hint="$lua_dir/activechat/" ;;
-        battlepass)  deployed_hint="$lua_dir/battlepass/  and  $lua_dir/lib/" ;;
+        battlepass)  deployed_hint="$lua_dir/battlepass/  and  $lua_dir/lib/CSMH/" ;;
         paragon)     deployed_hint="$lua_dir/paragon/" ;;
         bmah)        deployed_hint="$lua_dir/bmah_server.lua" ;;
         lootpet)     deployed_hint="$lua_dir/LootPet.lua" ;;
@@ -3213,7 +3314,7 @@ ale_script_remove() {
         case "$key" in
             accountwide) rm -rf "$lua_dir/accountwide" ;;
             activechat)  rm -rf "$lua_dir/activechat" ;;
-            battlepass)  rm -rf "$lua_dir/battlepass" "$lua_dir/lib" ;;
+            battlepass)  rm -rf "$lua_dir/battlepass" "$lua_dir/lib/CSMH" ;;
             paragon)     rm -rf "$lua_dir/paragon" ;;
             bmah)        rm -f  "$lua_dir/bmah_server.lua" ;;
             lootpet)     rm -f  "$lua_dir/LootPet.lua" ;;
@@ -3260,7 +3361,7 @@ sqlmod_is_installed() {
     for entry in "${SQL_MOD_REGISTRY[@]}"; do
         IFS='|' read -r k _ _ t <<< "$entry"
         if [ "$k" = "$key" ] && [ "$t" = "conf_module" ]; then
-            [ -d "$SERVER_DIR/modules/$key" ] && return 0 || return 1
+            [ -d "$SERVER_DIR/modules/$key/.git" ] && return 0 || return 1
         fi
     done
     [ -f "$SQLMOD_MARKER_DIR/$key.installed" ]
@@ -3275,9 +3376,12 @@ sqlmod_backup_world() {
     local ts; ts=$(date +%Y%m%d_%H%M%S)
     local bfile="$SQLMOD_BACKUP_DIR/${ts}_acore_world.sql.gz"
     print_info "Backing up acore_world → $(basename "$bfile") ..."
-    if docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" acore_world \
-       2>/dev/null | gzip > "$bfile"; then
+    if ( set -o pipefail
+         docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" acore_world \
+             2>/dev/null | gzip > "$bfile"
+    ); then
         print_success "Backup saved: $bfile"
+        _prune_backup_files "$SQLMOD_BACKUP_DIR" "*_acore_world.sql.gz" 2
         return 0
     else
         rm -f "$bfile"
@@ -3306,7 +3410,12 @@ _sqlmod_clone_or_update() {
         git -C "$target" pull --ff-only -q 2>&1 || true
     else
         print_info "Cloning $key..."
+        if [ -d "$target" ]; then
+            print_warning "Removing incomplete clone at $target"
+            rm -rf "$target"
+        fi
         git clone --depth=1 -q "$url" "$target" 2>&1 || {
+            rm -rf "$target"
             print_error "Clone failed for $url"
             return 1
         }
@@ -3335,7 +3444,7 @@ sqlmod_install() {
         return 1
     fi
 
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
     printf "  ${YELLOW}⚠  WARNING: SQL Mods modify the world database.${RST}\n"
     printf "  ${DIM}These changes are unlikely to corrupt the server, but a backup${RST}\n"
     printf "  ${DIM}will be taken automatically before proceeding.${RST}\n\n"
@@ -3504,7 +3613,12 @@ _sqlmod_install_conf_module() {    local key="$1" name="$2" url="$3"
         git -C "$module_dir" pull --ff-only -q 2>&1 || true
     else
         print_info "Cloning $key into modules/..."
+        if [ -d "$module_dir" ]; then
+            print_warning "Removing incomplete clone at $module_dir"
+            rm -rf "$module_dir"
+        fi
         git clone --depth=1 -q "$url" "$module_dir" 2>&1 || {
+            rm -rf "$module_dir"
             print_error "Clone failed"; return 1
         }
     fi
@@ -3833,7 +3947,7 @@ sqlmod_configure() {
 }
 
 configure_sqlmod_portals() {
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
     printf "  ${GOLD}── Configure: Portals in All Capitals ──${RST}\n\n"
     printf "  ${DIM}Adjust GO_TEMPLATE/GO_SPAWN base IDs if they conflict with other mods.${RST}\n\n"
 
@@ -3866,7 +3980,7 @@ configure_sqlmod_portals() {
 }
 
 configure_sqlmod_stackables() {
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
     printf "  ${GOLD}── Configure: All Stackables ──${RST}\n\n"
     printf "  ${DIM}Set the maximum stack size. Default is 200.${RST}\n\n"
 
@@ -3892,7 +4006,7 @@ configure_sqlmod_stackables() {
 }
 
 configure_sqlmod_npc_teleporter() {
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
     printf "  ${GOLD}── Configure: NPC Teleporter ──${RST}\n\n"
 
     local cfg_file="$SQLMOD_CONFIG_DIR/npc-teleporter.conf"
@@ -3930,7 +4044,7 @@ configure_sqlmod_npc_teleporter() {
 }
 
 configure_sqlmod_hearthstone() {
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
     printf "  ${GOLD}── Configure: Hearthstone Cooldowns ──${RST}\n\n"
     printf "  ${DIM}Select the Hearthstone cooldown.${RST}\n\n"
     printf "  1) 30 minutes (WotLK default)\n"
@@ -3976,13 +4090,13 @@ configure_sqlmod_custom_login() {
             print_error "Config not found. Install mod first."; press_enter; return
         fi
     fi
-    print_info "Opening mod_customlogin.conf in nano..."
-    nano "$conf_dest"
+    print_info "Opening mod_customlogin.conf..."
+    _open_text_file "$conf_dest"
 }
 
 configure_sqlmod_tweak() {
     local key="$1" name="$2"
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
     printf "  ${GOLD}── Configure: %s ──${RST}\n\n" "$name"
     printf "  ${DIM}Adjust creature_template multipliers. Leave blank to keep current.${RST}\n"
     printf "  ${DIM}Values must be positive numbers > 0. Changes apply immediately if installed.${RST}\n\n"
@@ -4018,7 +4132,7 @@ configure_sqlmod_tweak() {
     local invalid=false
     for v in "$new_h" "$new_d" "$new_a" "$new_spd"; do
         if ! [[ "$v" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
-           ! awk "BEGIN{exit !($v > 0)}" 2>/dev/null; then invalid=true; fi
+            ! awk "BEGIN{exit !($v > 0)}" 2>/dev/null; then invalid=true; fi
     done
     if $invalid; then
         print_error "All multipliers must be positive numbers greater than 0."
@@ -4038,7 +4152,7 @@ configure_sqlmod_tweak() {
 
 configure_sqlmod_xprates() {
     sqlmod_init
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
     printf "  ${GOLD}── Configure: XP Rates ──${RST}\n\n"
 
     local conf_path="$SERVER_DIR/env/dist/etc/worldserver.conf"
@@ -4068,7 +4182,7 @@ configure_sqlmod_xprates() {
     local invalid=false
     for v in "$new_kill" "$new_quest" "$new_explore"; do
         if ! [[ "$v" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
-           ! awk "BEGIN{exit !($v > 0)}" 2>/dev/null; then invalid=true; fi
+            ! awk "BEGIN{exit !($v > 0)}" 2>/dev/null; then invalid=true; fi
     done
     if $invalid; then
         print_error "XP multipliers must be positive numbers greater than 0."
@@ -4389,7 +4503,7 @@ _get_about_text() {
 
 show_about() {
     local key="$1" name="$2" url="$3"
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
     printf "  ${GOLD}── About: %s ──${RST}\n\n" "$name"
     _get_about_text "$key" | sed 's/^/  /'
     [ -n "$url" ] && printf "\n  ${DIM}Source: %s${RST}\n" "$url"
@@ -4409,7 +4523,7 @@ menu_ale_scripts() {
         local tlines; tlines=$_TERM_LINES
 
         # Clear menu area
-        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+        print_header
 
         if ! module_is_installed "mod-ale"; then
             printf "  ${RED}✗ mod-ale (ALE Lua Engine) is not installed.${RST}\n"
@@ -4478,9 +4592,13 @@ menu_ale_scripts() {
         fi
         local page_hint=""
         [ "$total_pages" -gt 1 ] && page_hint="   ${WHITE}< >${RST} Page"
-        printf "  ${WHITE}i<nums>${RST} Install   ${WHITE}r<num>${RST} Remove   ${WHITE}c<num>${RST} Config   ${WHITE}?<num>${RST} About${page_hint}   ${WHITE}ENTER${RST} Back\n"
+        printf "  ${WHITE}i<num>${RST} Install   ${WHITE}r<num>${RST} Remove   ${WHITE}c<num>${RST} Config   ${WHITE}?<num>${RST} About${page_hint}   ${WHITE}ENTER${RST} Back\n"
 
-        _read_menu_input "$(( tlines - 1 ))" || continue
+        if ! _read_menu_input "$(( tlines - 1 ))"; then
+            local _read_rc=$?
+            [ "$_read_rc" -eq 2 ] && continue
+            return
+        fi
         local raw_choice="$_MENU_INPUT"
 
         [ -z "$raw_choice" ] && return
@@ -4499,51 +4617,31 @@ menu_ale_scripts() {
                 [ "$page_start" -gt "$max_start" ] && page_start=$max_start
                 ;;
             i)
-                local -a num_tokens=()
-                if [[ "$nums" =~ ^[0-9]+$ ]] && [ "${#nums}" -gt 1 ]; then
-                    local ch
-                    for (( ch=0; ch<${#nums}; ch++ )); do
-                        num_tokens+=("${nums:$ch:1}")
-                    done
-                else
-                    read -r -a num_tokens <<< "$nums"
-                fi
-                local -a to_install=()
-                for c in "${num_tokens[@]}"; do
-                    if [[ "$c" =~ ^[0-9]+$ ]] && \
-                       [ "$c" -ge 1 ] && [ "$c" -le "$total" ]; then
-                        to_install+=("${available_entries[$((c - 1))]}")
-                    fi
-                done
-                if [ "${#to_install[@]}" -eq 0 ]; then
-                    print_warning "No valid script numbers — e.g. i135"
+                if ! _parse_single_index "$nums" "$total"; then
+                    print_warning "Invalid script number — e.g. i3"
                     press_enter; continue
                 fi
-                for entry in "${to_install[@]}"; do
-                    IFS='|' read -r key name url <<< "$entry"
-                    ale_script_install "$key" "$name" "$url" || true
-                    echo ""
-                done
+                local inum="$_PARSED_INDEX"
+                IFS='|' read -r key name url <<< "${available_entries[$((inum - 1))]}"
+                ale_script_install "$key" "$name" "$url" || true
                 press_enter
                 ;;
             r)
-                local rnum; rnum=$(echo "$nums" | tr -d ' ')
-                if ! [[ "$rnum" =~ ^[0-9]+$ ]] || \
-                   [ "$rnum" -lt 1 ] || [ "$rnum" -gt "$total" ]; then
+                if ! _parse_single_index "$nums" "$total"; then
                     print_warning "Invalid script number — e.g. r2"
                     press_enter; continue
                 fi
+                local rnum="$_PARSED_INDEX"
                 IFS='|' read -r key name url <<< "${available_entries[$((rnum - 1))]}"
                 ale_script_remove "$key" "$name"
                 press_enter
                 ;;
             c)
-                local cnum; cnum=$(echo "$nums" | tr -d ' ')
-                if ! [[ "$cnum" =~ ^[0-9]+$ ]] || \
-                   [ "$cnum" -lt 1 ] || [ "$cnum" -gt "$total" ]; then
+                if ! _parse_single_index "$nums" "$total"; then
                     print_warning "Invalid script number — e.g. c5"
                     press_enter; continue
                 fi
+                local cnum="$_PARSED_INDEX"
                 IFS='|' read -r key name url <<< "${available_entries[$((cnum - 1))]}"
                 case "$key" in
                     accountwide) configure_ale_accountwide ;;
@@ -4559,7 +4657,7 @@ menu_ale_scripts() {
             [?])
                 local anum; anum="${nums//[[:space:]]/}"
                 if ! [[ "$anum" =~ ^[0-9]+$ ]] || \
-                   [ "$anum" -lt 1 ] || [ "$anum" -gt "$total" ]; then
+                    [ "$anum" -lt 1 ] || [ "$anum" -gt "$total" ]; then
                     print_warning "Invalid script number -- e.g. ?5"
                     press_enter; continue
                 fi
@@ -4567,7 +4665,7 @@ menu_ale_scripts() {
                 show_about "$key" "$name" "$url"
                 ;;
             *)
-                print_warning "Unknown command. Use i<nums>, r<num>, c<num>, ?<num>, or ENTER."
+                print_warning "Unknown command. Use i<num>, r<num>, c<num>, ?<num>, or ENTER."
                 press_enter
                 ;;
         esac
@@ -4577,6 +4675,57 @@ menu_ale_scripts() {
 # ─────────────────────────────────────────────────────────────
 # MAIN MENUS
 # ─────────────────────────────────────────────────────────────
+
+_module_post_install_hook() {
+    local key="$1"
+    case "$key" in
+        mod-ah-bot)
+            echo ""
+            print_info "AH Bot installed — configure a bot character?"
+            if ask_yes_no "Configure AH Bot now?"; then configure_ahbot; fi
+            ;;
+        mod-ale)
+            echo ""
+            print_info "ALE requires post-install setup (lua_scripts dir + conf)."
+            if ask_yes_no "Configure ALE now?"; then configure_ale; fi
+            ;;
+        mod-challenge-modes)
+            echo ""
+            print_info "Challenge Modes has a conf file and requires EnablePlayerSettings = 1."
+            print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
+            if ask_yes_no "Configure Challenge Modes now?"; then configure_module_challenge_modes; fi
+            ;;
+        mod-player-bot-level-brackets)
+            echo ""
+            print_info "Bot Level Brackets requires the Playerbots module to function."
+            print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
+            if ask_yes_no "Configure Bot Level Brackets now?"; then configure_module_bot_level_brackets; fi
+            ;;
+        mod-npc-beastmaster)
+            echo ""
+            print_info "NPC Beastmaster has a conf file and SQL in db-world and db-characters."
+            print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
+            if ask_yes_no "Configure NPC Beastmaster now?"; then configure_module_npc_beastmaster; fi
+            echo ""
+            print_info "Players can summon the Beastmaster NPC anywhere via .beastmaster."
+            print_info "You can also permanently place it in capital cities."
+            _offer_npc_in_capitals 601026 "White Fang (Beastmaster NPC)" \
+                "Run these commands after rebuilding and starting the worldserver."
+            ;;
+        mod-transmog)
+            echo ""
+            print_info "Transmogrification adds NPC entry 190010 — it must be manually placed in the world."
+            _offer_npc_in_capitals 190010 "Transmogrifier NPC" \
+                "Run these commands after rebuilding and starting the worldserver."
+            ;;
+        mod-1v1-arena)
+            echo ""
+            print_info "1v1 Arena adds a Battlemaster NPC (entry 999991) — it must be manually placed in the world."
+            _offer_npc_in_capitals 999991 "Arena Battlemaster 1v1" \
+                "Run these commands after rebuilding and starting the worldserver."
+            ;;
+    esac
+}
 
 # ── Unified module browser ────────────────────────────────────
 # i <nums>  Install one or more (space-separated)
@@ -4657,7 +4806,7 @@ menu_modules() {
         local current_page=$(( page_start / page_size + 1 ))
 
         # Clear and draw
-        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+        print_header
         printf "  ${GOLD}── Modules ──────────────────────────────────────${RST}\n"
         printf "  ${DIM}%-4s %-42s %s${RST}\n" "Num" "Module" "Status"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
@@ -4687,9 +4836,13 @@ menu_modules() {
         fi
         local page_hint=""
         [ "$total_pages" -gt 1 ] && page_hint="   ${WHITE}< >${RST} Page"
-        printf "  ${WHITE}i <nums>${RST} Install   ${WHITE}r <num>${RST} Remove   ${WHITE}c <num>${RST} Config   ${WHITE}?<num>${RST} About${page_hint}   ${WHITE}ENTER${RST} Back\n"
+        printf "  ${WHITE}i<num>${RST} Install   ${WHITE}r<num>${RST} Remove   ${WHITE}c<num>${RST} Config   ${WHITE}?<num>${RST} About${page_hint}   ${WHITE}ENTER${RST} Back\n"
 
-        _read_menu_input "$(( tlines - 1 ))" || continue
+        if ! _read_menu_input "$(( tlines - 1 ))"; then
+            local _read_rc=$?
+            [ "$_read_rc" -eq 2 ] && continue
+            return
+        fi
         local raw_choice="$_MENU_INPUT"
 
         [ -z "$raw_choice" ] && return
@@ -4709,13 +4862,15 @@ menu_modules() {
                 [ "$page_start" -gt "$max_start" ] && page_start=$max_start
                 ;;
             i)
-                if [ -z "$nums" ]; then
-                    print_warning "Specify numbers — e.g. i 1 3"
+                if ! _parse_single_index "$nums" "$total"; then
+                    print_warning "Invalid module number — e.g. i3"
                     press_enter; continue
                 fi
+                local inum="$_PARSED_INDEX"
+                IFS='|' read -r key name url sql_dirs <<< "${available_entries[$((inum - 1))]}"
 
                 if [ "$SERVER_TYPE" != "playerbots" ]; then
-                    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                    print_header
                     print_warning "Module installs on $SERVER_NAME are experimental."
                     print_info "Modules will be cloned but rebuilding is not supported on this install type."
                     print_info "Recommended: reinstall as Playerbots for full module support."
@@ -4723,34 +4878,16 @@ menu_modules() {
                     if ! ask_yes_no "Continue anyway?"; then continue; fi
                 fi
 
-                local -a to_install=()
-                local c
-                for c in $nums; do
-                    if [[ "$c" =~ ^[0-9]+$ ]] && \
-                       [ "$c" -ge 1 ] && [ "$c" -le "$total" ]; then
-                        to_install+=("${available_entries[$((c - 1))]}")
-                    fi
-                done
-
-                if [ "${#to_install[@]}" -eq 0 ]; then
-                    print_warning "No valid module numbers — e.g. i 1 3"
-                    press_enter; continue
-                fi
-
-                printf '\033[%d;1H\033[J' "$MENU_START_ROW"
-                for entry in "${to_install[@]}"; do
-                    IFS='|' read -r key name url sql_dirs <<< "$entry"
-                    module_install "$key" "$name" "$url" "$sql_dirs" || true
-                    upsert_mod_commands "$key"
-                    echo ""
-                done
-                print_info "Modules cloned. SQL files will be applied automatically on next server start."
+                print_header
+                module_install "$key" "$name" "$url" "$sql_dirs" || true
+                upsert_mod_commands "$key"
+                print_info "Module cloned. SQL files will be applied automatically on next server start."
                 print_info "All C++ modules require a worldserver rebuild before they can load."
                 print_info "Conf files can be set up via 'Configure' — run configure after a rebuild if"
                 print_info "the conf.dist files are not yet present."
 
                 if [ "$SERVER_TYPE" = "playerbots" ]; then
-                    print_info "Rebuild the worldserver to compile the new modules in."
+                    print_info "Rebuild the worldserver to compile the new module in."
                     echo ""
                     if ask_yes_no "Rebuild the worldserver now?"; then
                         rebuild_worldserver
@@ -4759,69 +4896,21 @@ menu_modules() {
                     print_info "(Skipping rebuild — not supported on this install type.)"
                 fi
 
-                for entry in "${to_install[@]}"; do
-                    IFS='|' read -r key name _ _ <<< "$entry"
-                    if [ "$key" = "mod-ah-bot" ]; then
-                        echo ""
-                        print_info "AH Bot installed — configure a bot character?"
-                        if ask_yes_no "Configure AH Bot now?"; then configure_ahbot; fi
-                    fi
-                    if [ "$key" = "mod-ale" ]; then
-                        echo ""
-                        print_info "ALE requires post-install setup (lua_scripts dir + conf)."
-                        if ask_yes_no "Configure ALE now?"; then configure_ale; fi
-                    fi
-                    if [ "$key" = "mod-challenge-modes" ]; then
-                        echo ""
-                        print_info "Challenge Modes has a conf file and requires EnablePlayerSettings = 1."
-                        print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
-                        if ask_yes_no "Configure Challenge Modes now?"; then configure_module_challenge_modes; fi
-                    fi
-                    if [ "$key" = "mod-player-bot-level-brackets" ]; then
-                        echo ""
-                        print_info "Bot Level Brackets requires the Playerbots module to function."
-                        print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
-                        if ask_yes_no "Configure Bot Level Brackets now?"; then configure_module_bot_level_brackets; fi
-                    fi
-                    if [ "$key" = "mod-npc-beastmaster" ]; then
-                        echo ""
-                        print_info "NPC Beastmaster has a conf file and SQL in db-world and db-characters."
-                        print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
-                        if ask_yes_no "Configure NPC Beastmaster now?"; then configure_module_npc_beastmaster; fi
-                        echo ""
-                        print_info "Players can summon the Beastmaster NPC anywhere via .beastmaster."
-                        print_info "You can also permanently place it in capital cities."
-                        _offer_npc_in_capitals 601026 "White Fang (Beastmaster NPC)" \
-                            "Run these commands after rebuilding and starting the worldserver."
-                    fi
-                    if [ "$key" = "mod-transmog" ]; then
-                        echo ""
-                        print_info "Transmogrification adds NPC entry 190010 — it must be manually placed in the world."
-                        _offer_npc_in_capitals 190010 "Transmogrifier NPC" \
-                            "Run these commands after rebuilding and starting the worldserver."
-                    fi
-                    if [ "$key" = "mod-1v1-arena" ]; then
-                        echo ""
-                        print_info "1v1 Arena adds a Battlemaster NPC (entry 999991) — it must be manually placed in the world."
-                        _offer_npc_in_capitals 999991 "Arena Battlemaster 1v1" \
-                            "Run these commands after rebuilding and starting the worldserver."
-                    fi
-                done
+                _module_post_install_hook "$key"
                 press_enter
                 ;;
             r)
-                local rnum; rnum=$(echo "$nums" | tr -d ' ')
-                if ! [[ "$rnum" =~ ^[0-9]+$ ]] || \
-                   [ "$rnum" -lt 1 ] || [ "$rnum" -gt "$total" ]; then
+                if ! _parse_single_index "$nums" "$total"; then
                     print_warning "Invalid module number — e.g. r2"
                     press_enter; continue
                 fi
+                local rnum="$_PARSED_INDEX"
                 IFS='|' read -r key name _ _ <<< "${available_entries[$((rnum - 1))]}"
                 if ! module_is_installed "$key"; then
                     print_warning "$name is not installed."
                     press_enter; continue
                 fi
-                printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                print_header
                 module_remove "$key" "$name"
                 if ! module_is_installed "$key"; then
                     remove_mod_commands "$key"
@@ -4838,12 +4927,12 @@ menu_modules() {
             c)
                 local cnum; cnum="${nums//[[:space:]]/}"
                 if ! [[ "$cnum" =~ ^[0-9]+$ ]] || \
-                   [ "$cnum" -lt 1 ] || [ "$cnum" -gt "$total" ]; then
+                    [ "$cnum" -lt 1 ] || [ "$cnum" -gt "$total" ]; then
                     print_warning "Invalid module number — e.g. c3"
                     press_enter; continue
                 fi
                 IFS='|' read -r key name _ _ <<< "${available_entries[$((cnum - 1))]}"
-                printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                print_header
                 case "$key" in
                     mod-ah-bot)                  configure_ahbot ;;
                     mod-ale)                     configure_ale ;;
@@ -4860,7 +4949,7 @@ menu_modules() {
             [?])
                 local anum; anum="${nums//[[:space:]]/}"
                 if ! [[ "$anum" =~ ^[0-9]+$ ]] || \
-                   [ "$anum" -lt 1 ] || [ "$anum" -gt "$total" ]; then
+                    [ "$anum" -lt 1 ] || [ "$anum" -gt "$total" ]; then
                     print_warning "Invalid module number -- e.g. ?3"
                     press_enter; continue
                 fi
@@ -4868,7 +4957,7 @@ menu_modules() {
                 show_about "$key" "$name" "$url"
                 ;;
             *)
-                print_warning "Unknown command. Use i <nums>, r <num>, c <num>, ?<num>, or ENTER."
+                print_warning "Unknown command. Use i<num>, r<num>, c<num>, ?<num>, or ENTER."
                 press_enter
                 ;;
         esac
@@ -5077,7 +5166,7 @@ menu_module_management() {
             _setup_screen
         fi
         local tlines; tlines=$_TERM_LINES
-        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+        print_header
 
         local -a available_entries=()
         local entry
@@ -5120,7 +5209,11 @@ menu_module_management() {
         [ "$total_pages" -gt 1 ] && page_hint="   ${WHITE}< >${RST} Page"
         printf "  ${WHITE}a<num>${RST} Activate conf   ${WHITE}e<num>${RST} Edit conf   ${WHITE}r<num>${RST} Reset defaults   ${WHITE}?<num>${RST} Help${page_hint}   ${WHITE}ENTER${RST} Back\n"
 
-        _read_menu_input "$(( tlines - 1 ))" || continue
+        if ! _read_menu_input "$(( tlines - 1 ))"; then
+            local _read_rc=$?
+            [ "$_read_rc" -eq 2 ] && continue
+            return
+        fi
         local raw_choice="$_MENU_INPUT"
         [ -z "$raw_choice" ] && return
 
@@ -5138,16 +5231,16 @@ menu_module_management() {
                 [ "$page_start" -gt "$max_start" ] && page_start=$max_start
                 ;;
             a|e|r|?)
-                inum="${nums//[[:space:]]/}"
-                if ! [[ "$inum" =~ ^[0-9]+$ ]] || [ "$inum" -lt 1 ] || [ "$inum" -gt "$total" ]; then
+                if ! _parse_single_index "$nums" "$total"; then
                     print_warning "Invalid module number."
                     press_enter
                     continue
                 fi
+                inum="$_PARSED_INDEX"
                 IFS='|' read -r key name url sql_dirs <<< "${available_entries[$((inum - 1))]}"
 
                 if [ "${action,,}" = "?" ]; then
-                    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                    print_header
                     printf "  ${GOLD}── Module Config Help: %s ──${RST}\n\n" "$name"
                     local conf_name conf_dist conf_active
                     conf_name=$(_module_conf_name "$key")
@@ -5222,7 +5315,7 @@ menu_module_management() {
                             continue
                         fi
                     fi
-                    nano "$conf_active"
+                    _open_text_file "$conf_active"
                     print_info "Restart worldserver to apply."
                     press_enter
                     continue
@@ -5267,7 +5360,7 @@ show_first_run_welcome() {
     local marker="$SERVER_DIR/.dml-manager-seen"
     # Returning user: clear the detect_install output and go straight to the menu
     if [ -f "$marker" ]; then
-        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+        print_header
         return 0
     fi
 
@@ -5359,7 +5452,7 @@ show_first_run_welcome() {
     touch "$marker" 2>/dev/null || true
     # Restore static logo now that the welcome screen is done
     _setup_screen
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
 }
 
 # ── SQL Mods submenu ──────────────────────────────────────────
@@ -5373,7 +5466,7 @@ menu_sql_mods() {
             _setup_screen
         fi
         local tlines; tlines=$_TERM_LINES
-        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+        print_header
 
         local -a available_entries=()
         local -a markers=()
@@ -5426,7 +5519,11 @@ menu_sql_mods() {
         [ "$total_pages" -gt 1 ] && page_hint="   ${WHITE}< >${RST} Page"
         printf "  ${WHITE}i<num>${RST} Install   ${WHITE}r<num>${RST} Remove   ${WHITE}c<num>${RST} Config   ${WHITE}?<num>${RST} About${page_hint}   ${WHITE}ENTER${RST} Back\n"
 
-        _read_menu_input "$(( tlines - 1 ))" || continue
+        if ! _read_menu_input "$(( tlines - 1 ))"; then
+            local _read_rc=$?
+            [ "$_read_rc" -eq 2 ] && continue
+            return
+        fi
         local raw_choice="$_MENU_INPUT"
         [ -z "$raw_choice" ] && return
 
@@ -5444,47 +5541,43 @@ menu_sql_mods() {
                 [ "$page_start" -gt "$max_start" ] && page_start=$max_start
                 ;;
             i)
-                local inum; inum="${nums//[[:space:]]/}"
-                if ! [[ "$inum" =~ ^[0-9]+$ ]] || \
-                   [ "$inum" -lt 1 ] || [ "$inum" -gt "$total" ]; then
+                if ! _parse_single_index "$nums" "$total"; then
                     print_warning "Invalid mod number — e.g. i3"
                     press_enter; continue
                 fi
+                local inum="$_PARSED_INDEX"
                 IFS='|' read -r key name url type <<< "${available_entries[$((inum - 1))]}"
-                printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                print_header
                 sqlmod_install "$key" "$name" "$url" "$type" || true
                 press_enter
                 ;;
             r)
-                local rnum; rnum="${nums//[[:space:]]/}"
-                if ! [[ "$rnum" =~ ^[0-9]+$ ]] || \
-                   [ "$rnum" -lt 1 ] || [ "$rnum" -gt "$total" ]; then
+                if ! _parse_single_index "$nums" "$total"; then
                     print_warning "Invalid mod number — e.g. r3"
                     press_enter; continue
                 fi
+                local rnum="$_PARSED_INDEX"
                 IFS='|' read -r key name url type <<< "${available_entries[$((rnum - 1))]}"
-                printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                print_header
                 sqlmod_remove "$key" "$name" "$url" "$type" || true
                 press_enter
                 ;;
             c)
-                local cnum; cnum="${nums//[[:space:]]/}"
-                if ! [[ "$cnum" =~ ^[0-9]+$ ]] || \
-                   [ "$cnum" -lt 1 ] || [ "$cnum" -gt "$total" ]; then
+                if ! _parse_single_index "$nums" "$total"; then
                     print_warning "Invalid mod number — e.g. c5"
                     press_enter; continue
                 fi
+                local cnum="$_PARSED_INDEX"
                 IFS='|' read -r key name url type <<< "${available_entries[$((cnum - 1))]}"
-                printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+                print_header
                 sqlmod_configure "$key" "$name"
                 ;;
             [?])
-                local anum; anum="${nums//[[:space:]]/}"
-                if ! [[ "$anum" =~ ^[0-9]+$ ]] || \
-                   [ "$anum" -lt 1 ] || [ "$anum" -gt "$total" ]; then
+                if ! _parse_single_index "$nums" "$total"; then
                     print_warning "Invalid mod number -- e.g. ?3"
                     press_enter; continue
                 fi
+                local anum="$_PARSED_INDEX"
                 IFS='|' read -r key name url type <<< "${available_entries[$((anum - 1))]}"
                 show_about "$key" "$name" "$url"
                 ;;
@@ -5504,7 +5597,7 @@ menu_server_maintenance() {
             _RESIZE_NEEDED=false
             _setup_screen
         fi
-        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+        print_header
         printf "  ${GOLD}${BOLD}Server Maintenance${RST}\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${WHITE}1)${RST} Repair install state\n"
@@ -5514,7 +5607,11 @@ menu_server_maintenance() {
         printf "  ${DIM}  [ENTER] Back${RST}\n"
 
         local _tlines; _tlines=$_TERM_LINES
-        _read_menu_input "$(( _tlines - 1 ))" || continue
+        if ! _read_menu_input "$(( _tlines - 1 ))"; then
+            local _read_rc=$?
+            [ "$_read_rc" -eq 2 ] && continue
+            return
+        fi
         local choice="${_MENU_INPUT,,}"
 
         case "$choice" in
@@ -5533,16 +5630,19 @@ _maintenance_backup_all() {
         print_error "Database container is not running."
         return 1
     fi
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
     printf "  ${GOLD}── Database Backup ──${RST}\n\n"
     local ts; ts=$(date +%Y%m%d_%H%M%S)
     local failed=0
     for db in acore_world acore_characters acore_auth; do
         local bfile="$SQLMOD_BACKUP_DIR/${ts}_${db}.sql.gz"
         print_info "Backing up ${db} → $(basename "$bfile") ..."
-        if docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" "$db" \
-           2>/dev/null | gzip > "$bfile"; then
+        if ( set -o pipefail
+             docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" "$db" \
+                 2>/dev/null | gzip > "$bfile"
+        ); then
             print_success "  ✓ $db"
+            _prune_backup_files "$SQLMOD_BACKUP_DIR" "*_${db}.sql.gz" 2
         else
             rm -f "$bfile"
             print_error "  ✗ $db backup failed"
@@ -5565,7 +5665,7 @@ _maintenance_import() {
         press_enter; return
     fi
 
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
     printf "  ${GOLD}── Restore / Import Backup ──${RST}\n\n"
 
     # List available backups sorted newest-first
@@ -5626,8 +5726,10 @@ _maintenance_import() {
     print_info "Taking safety backup of current ${target_db} before restore..."
     local ts; ts=$(date +%Y%m%d_%H%M%S)
     local safefile="$SQLMOD_BACKUP_DIR/${ts}_pre_restore_${target_db}.sql.gz"
-    if docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" "$target_db" \
-       2>/dev/null | gzip > "$safefile"; then
+    if ( set -o pipefail
+         docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" "$target_db" \
+             2>/dev/null | gzip > "$safefile"
+    ); then
         print_success "Safety backup: $(basename "$safefile")"
     else
         rm -f "$safefile"
@@ -5636,15 +5738,17 @@ _maintenance_import() {
 
     print_info "Restoring ${target_db} from $(basename "$chosen_file")..."
     if [[ "$chosen_file" == *.gz ]]; then
-        if gzip -dc "$chosen_file" | docker exec -i "$DB_CONTAINER" \
-           mysql -uroot -p"$DB_ROOT_PASSWORD" "$target_db" 2>&1; then
+        if ( set -o pipefail
+             gzip -dc "$chosen_file" | docker exec -i "$DB_CONTAINER" \
+                 mysql -uroot -p"$DB_ROOT_PASSWORD" "$target_db" 2>&1
+        ); then
             print_success "Restore complete!"
         else
             print_error "Restore failed. Check the file and try again."
         fi
     else
         if docker exec -i "$DB_CONTAINER" \
-           mysql -uroot -p"$DB_ROOT_PASSWORD" "$target_db" < "$chosen_file" 2>&1; then
+            mysql -uroot -p"$DB_ROOT_PASSWORD" "$target_db" < "$chosen_file" 2>&1; then
             print_success "Restore complete!"
         else
             print_error "Restore failed. Check the file and try again."
@@ -5656,7 +5760,7 @@ _maintenance_import() {
 main_menu() {
     _IN_MENU=true
     _setup_screen
-    printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+    print_header
     while true; do
         _RESIZE_NEEDED=false
         _setup_screen
@@ -5674,7 +5778,7 @@ main_menu() {
         fi
 
         # Clear from menu area downward, then print single-column menu
-        printf '\033[%d;1H\033[J' "$MENU_START_ROW"
+        print_header
 
         printf "  ${WHITE}Server:${RST} ${CYAN}%s${RST}  ${GOLD}✦${RST}  ${WHITE}State:${RST} %b  ${GOLD}✦${RST}  ${WHITE}Build:${RST} %b\n" \
             "$(basename "$SERVER_DIR")" "$state_str" "$build_str"
@@ -5703,7 +5807,11 @@ main_menu() {
         # Input at second-to-last terminal row so it's always visible
         local _tlines; _tlines=$_TERM_LINES
         local _irow=$(( _tlines - 1 ))
-        _read_menu_input "$_irow" || continue
+        if ! _read_menu_input "$_irow"; then
+            local _read_rc=$?
+            [ "$_read_rc" -eq 2 ] && continue
+            return
+        fi
         local choice="${_MENU_INPUT,,}"
 
         case "$choice" in
