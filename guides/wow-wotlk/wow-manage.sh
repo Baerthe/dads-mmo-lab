@@ -628,15 +628,15 @@ _cmd_block_for() {
             ;;
         activechat)
             printf '%s\n' \
-                'Active Chat (ALE)' \
-                'Broadcasts a configurable activity reminder to all online players at a set interval. Useful for prompting idle players. Fully automatic — no player interaction needed.' \
+                'Azeroth Chatter (ALE)' \
+                'Fills world chat with ambient, lore-grounded RP chatter from a roster of recurring named residents — each with a faction, role, and personality. Time-of-day, seasonal, and event-aware. Far richer than the original ActiveChat.' \
                 '' \
-                'Commands: (none — message is broadcast on a server timer)'
+                'Commands: (none — chat fires on server timers automatically)'
             ;;
         levelupreward)
             printf '%s\n' \
                 'Level Up Reward (ALE)' \
-                'Automatically grants players an item or currency reward each time they level up. Reward type and quantity are configurable in the Lua script.' \
+                'Awards a random class-appropriate equippable item on every level-up. Quality is rolled (10% epic / 25% rare / 65% uncommon) with a fallback chain. Armor type scales with level (e.g. Mail → Plate at 40). First level-up also teaches all class weapon proficiencies.' \
                 '' \
                 'Commands: (none — reward is granted automatically on level-up)'
             ;;
@@ -1394,11 +1394,11 @@ declare -a MODULE_UPDATE_FILES=(
 # inside ale_script_install() and the configure_ale_* functions.
 declare -a ALE_SCRIPT_REGISTRY=(
     "accountwide|Accountwide Systems (achievements, currency, mounts, pets)|https://github.com/Aldori15/azerothcore-eluna-accountwide.git"
-    "activechat|Active Chat (simulated world/guild chat for immersion)|https://github.com/Day36512/ActiveChat.git"
+    "activechat|Azeroth Chatter (lore-grounded ambient world RP chat)|https://github.com/svey-xyz/ActiveChat.git"
     "battlepass|Battle Pass System (XP progression + rewards + client addon)|https://github.com/Shonik/lua-battlepass.git"
     "bmah|Black Market Auction House (MoP-style BMAH + client addon)|https://github.com/Youpeoples/Black-Market-Auction-House.git"
     "exchangenpc|Exchange NPC (configurable item-exchange vendor NPC)|https://github.com/55Honey/Acore_ExchangeNpc.git"
-    "levelupreward|Level Up Reward (mail gold/items on level-up)|https://github.com/55Honey/Acore_LevelUpReward.git"
+    "levelupreward|Level Up Reward (random class-appropriate gear on every level-up)|https://github.com/phreeez/Levelreward.git"
     "lootpet|Loot Pet (vanity pet auto-loots nearby corpses)|https://github.com/Brytenwally/Lootpet.git"
     "paragon|Paragon Anniversary (endless post-80 stat progression + client addon)|https://github.com/Grim-Batol/Paragon-Anniversary.git"
     "sitmeanrest|Sit Means Rest (regen buff on /sit; strips on movement)|https://github.com/Brytenwally/SitMeansRest.git"
@@ -2164,12 +2164,10 @@ ale_lua_is_deployed() {
     case "$key" in
         accountwide)   [ -d "$lua_dir/accountwide" ] && \
                         ls "$lua_dir/accountwide"/*.lua &>/dev/null ;;
-        levelupreward) ls "$lua_dir"/LevelUpReward*.lua &>/dev/null 2>&1 || \
-                        ls "$lua_dir"/levelup*.lua &>/dev/null 2>&1 || \
-                        ls "$lua_dir"/LevelUp*.lua &>/dev/null 2>&1 ;;
+        levelupreward) ls "$lua_dir"/levelreward.lua &>/dev/null 2>&1 ;;
         exchangenpc)   ls "$lua_dir"/Exchange*.lua &>/dev/null 2>&1 || \
                         ls "$lua_dir"/exchange*.lua &>/dev/null 2>&1 ;;
-        activechat)    [ -d "$lua_dir/activechat" ] ;;
+        activechat)    [ -d "$lua_dir/AzerothChatter" ] ;;
         battlepass)    [ -d "$lua_dir/battlepass" ] ;;
         paragon)       [ -d "$lua_dir/paragon" ] ;;
         bmah)          [ -f "$lua_dir/bmah_server.lua" ] ;;
@@ -2999,16 +2997,16 @@ ale_deploy_lua_files() {
             fi
             ;;
         activechat)
-            # Upstream layout: ActiveChat/ subdirectory
-            local src="$clone_dir/ActiveChat"
+            # Upstream layout: AzerothChatter/ subdirectory
+            local src="$clone_dir/AzerothChatter"
             if [ -d "$src" ]; then
-                mkdir -p "$lua_dir/activechat"
-                cp -r "$src"/. "$lua_dir/activechat/" && \
-                    print_success "Deployed → lua_scripts/activechat/" || \
+                mkdir -p "$lua_dir/AzerothChatter"
+                cp -r "$src"/. "$lua_dir/AzerothChatter/" && \
+                    print_success "Deployed → lua_scripts/AzerothChatter/" || \
                     print_warning "Copy failed — check $src"
             else
                 print_warning "Expected directory not found: $src"
-                print_info "Manually copy ActiveChat/ contents to: $lua_dir/activechat/"
+                print_info "Manually copy AzerothChatter/ contents to: $lua_dir/AzerothChatter/"
             fi
             ;;
         battlepass)
@@ -3278,7 +3276,7 @@ ale_script_remove() {
     local deployed_hint
     case "$key" in
         accountwide) deployed_hint="$lua_dir/accountwide/" ;;
-        activechat)  deployed_hint="$lua_dir/activechat/" ;;
+        activechat)  deployed_hint="$lua_dir/AzerothChatter/" ;;
         battlepass)  deployed_hint="$lua_dir/battlepass/  and  $lua_dir/lib/CSMH/" ;;
         paragon)     deployed_hint="$lua_dir/paragon/" ;;
         bmah)        deployed_hint="$lua_dir/bmah_server.lua" ;;
@@ -3293,7 +3291,7 @@ ale_script_remove() {
     if ask_yes_no "Also remove deployed Lua files from lua_scripts/?"; then
         case "$key" in
             accountwide) rm -rf "$lua_dir/accountwide" ;;
-            activechat)  rm -rf "$lua_dir/activechat" ;;
+            activechat)  rm -rf "$lua_dir/AzerothChatter" ;;
             battlepass)  rm -rf "$lua_dir/battlepass" "$lua_dir/lib/CSMH" ;;
             paragon)     rm -rf "$lua_dir/paragon" ;;
             bmah)        rm -f  "$lua_dir/bmah_server.lua" ;;
@@ -4305,11 +4303,12 @@ _get_about_text() {
             ;;
         levelupreward)
             printf '%s\n' \
-                'Sends in-game mail with gold or items when players hit' \
-                'configured levels. A lore-friendly mode includes the player' \
-                'rank in the mail text. Default rewards scale from 1g at' \
-                'level 10 up to generous amounts at higher levels. Fully' \
-                'customizable per level in the Lua config.'
+                'Awards a random class-appropriate equippable item on every' \
+                'level-up. Quality is rolled: 10% Epic, 25% Rare, 65% Uncommon,' \
+                'with a fallback chain down to Common if the DB has no match.' \
+                'Armor type scales with level (e.g. Warrior/Paladin switch' \
+                'Mail → Plate at 40). First level-up also teaches all class' \
+                'weapon proficiencies. Built natively for mod-ale.'
             ;;
         exchangenpc)
             printf '%s\n' \
@@ -4321,11 +4320,11 @@ _get_about_text() {
             ;;
         activechat)
             printf '%s\n' \
-                'Simulates lively world and guild chat with scripted dialogues' \
-                'between fake players, making low-population servers feel' \
-                'inhabited. Chat text tables are fully customizable -- add new' \
-                'lines to npc_text.lua and npc_text_guild.lua to expand the' \
-                'conversation pool.'
+                'Fills world chat with ambient lore-grounded RP chatter from' \
+                'a roster of recurring named residents — each with a faction,' \
+                'role, and personality type. Time-of-day, seasonal, and' \
+                'in-game event aware. 45+ lore placeholders keep lines fresh.' \
+                'A major upgrade over the original ActiveChat. Requires mod-ale.'
             ;;
         battlepass)
             printf '%s\n' \
