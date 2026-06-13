@@ -643,9 +643,9 @@ _cmd_block_for() {
         sod)
             printf '%s\n' \
                 'Season of Discovery Buff (ALE)' \
-                'Applies a configurable stat buff to all players on login, similar to WoW'"'"'s Season of Discovery rune bonuses. Useful for custom server balancing and boosting new players.' \
+                'Tiered Discoverer'"'"'s Delight XP bonus that scales down as players level. Awards +300% at levels 1-10, stepping down to +50% at 71-79. Level 80 gets no buff. Auto-updates on level-up. Sourced from the Dad'"'"'s MMO Lab ALE-Pub collection.' \
                 '' \
-                'Commands: (none — buff is applied automatically on login)'
+                'Commands: (none — buff applied automatically on login and level-up)'
             ;;
         sitmeanrest)
             printf '%s\n' \
@@ -1402,7 +1402,7 @@ declare -a ALE_SCRIPT_REGISTRY=(
     "lootpet|Loot Pet (vanity pet auto-loots nearby corpses)|https://github.com/Brytenwally/Lootpet.git"
     "paragon|Paragon Anniversary (endless post-80 stat progression + client addon)|https://github.com/Grim-Batol/Paragon-Anniversary.git"
     "sitmeanrest|Sit Means Rest (regen buff on /sit; strips on movement)|https://github.com/Brytenwally/SitMeansRest.git"
-    "sod|Season of Discovery Buffs (phased leveling XP rate bonus)|https://github.com/notepadguyOfficial/acore_sod.git"
+    "sod|Season of Discovery Buffs (phased leveling XP rate bonus)|https://github.com/DadsMmoLab/dads-mmo-lab.git"
     "unlimitedammo|Unlimited Ammo (auto-refills Hunter arrows/bullets)|https://github.com/Day36512/Acore_Lua_Unlimited_Ammo.git"
 )
 
@@ -2172,9 +2172,7 @@ ale_lua_is_deployed() {
         paragon)       [ -d "$lua_dir/paragon" ] ;;
         bmah)          [ -f "$lua_dir/bmah_server.lua" ] ;;
         lootpet)       [ -f "$lua_dir/LootPet.lua" ] ;;
-        sod)           ls "$lua_dir"/sod*.lua &>/dev/null 2>&1 || \
-                        ls "$lua_dir"/SoD*.lua &>/dev/null 2>&1 || \
-                        ls "$lua_dir"/season*.lua &>/dev/null 2>&1 ;;
+        sod)           [ -f "$lua_dir/SOD.lua" ] ;;
         sitmeanrest)   [ -f "$lua_dir/SitMeansRest.lua" ] ;;
         unlimitedammo) [ -f "$lua_dir/UnlimitedAmmo.lua" ] ;;
         *)             false ;;
@@ -3052,12 +3050,14 @@ ale_deploy_lua_files() {
             fi
             ;;
         sod)
-            local count=0
-            if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
-                count=$(ls "$clone_dir"/*.lua 2>/dev/null | wc -l | tr -d ' ')
-                print_success "Deployed $count file(s) → lua_scripts/"
+            # Script lives in a subdirectory of the dads-mmo-lab repo
+            local sod_src="$clone_dir/guides/wow-wotlk/ALE-Pub/SeasonOfDiscovery/SOD.lua"
+            if [ -f "$sod_src" ]; then
+                cp "$sod_src" "$lua_dir/" && \
+                    print_success "Deployed SOD.lua → lua_scripts/" || \
+                    print_warning "Copy failed — check $sod_src"
             else
-                print_warning "No .lua files found in clone root — check $clone_dir"
+                print_warning "SOD.lua not found at expected path: $sod_src"
             fi
             ;;
         sitmeanrest)
@@ -3106,11 +3106,32 @@ ale_script_install() {
             print_warning "Removing incomplete clone at $clone_dir"
             rm -rf "$clone_dir"
         fi
-        if ! git clone --depth 1 "$url" "$clone_dir"; then
-            rm -rf "$clone_dir"
-            print_error "Clone failed for $name!"
-            return 1
-        fi
+        case "$key" in
+            sod)
+                # sod lives in a subdirectory of the main dads-mmo-lab repo.
+                # Use sparse checkout so only that subfolder is fetched.
+                if ! git clone --depth 1 --filter=blob:none --sparse \
+                        "$url" "$clone_dir"; then
+                    rm -rf "$clone_dir"
+                    print_error "Clone failed for $name!"
+                    return 1
+                fi
+                (cd "$clone_dir" && \
+                    git sparse-checkout set \
+                        "guides/wow-wotlk/ALE-Pub/SeasonOfDiscovery") || {
+                    rm -rf "$clone_dir"
+                    print_error "Sparse checkout failed for $name!"
+                    return 1
+                }
+                ;;
+            *)
+                if ! git clone --depth 1 "$url" "$clone_dir"; then
+                    rm -rf "$clone_dir"
+                    print_error "Clone failed for $name!"
+                    return 1
+                fi
+                ;;
+        esac
         print_success "Cloned $name"
     fi
 
@@ -3260,7 +3281,7 @@ ale_script_remove() {
     # For scripts whose deployed filenames come from the clone, collect them BEFORE removal
     local -a generic_deployed_files=()
     case "$key" in
-        levelupreward|exchangenpc|sod)
+        levelupreward|exchangenpc)
             while IFS= read -r f; do
                 generic_deployed_files+=("$(basename "$f")")
             done < <(find "$clone_dir" -maxdepth 1 -name "*.lua" 2>/dev/null)
@@ -3282,6 +3303,7 @@ ale_script_remove() {
         bmah)        deployed_hint="$lua_dir/bmah_server.lua" ;;
         lootpet)     deployed_hint="$lua_dir/LootPet.lua" ;;
         sitmeanrest)  deployed_hint="$lua_dir/SitMeansRest.lua" ;;
+        sod)         deployed_hint="$lua_dir/SOD.lua" ;;
         unlimitedammo) deployed_hint="$lua_dir/UnlimitedAmmo.lua" ;;
         *)           deployed_hint="$lua_dir/ (search for files from this script)" ;;
     esac
@@ -3297,8 +3319,9 @@ ale_script_remove() {
             bmah)        rm -f  "$lua_dir/bmah_server.lua" ;;
             lootpet)     rm -f  "$lua_dir/LootPet.lua" ;;
             sitmeanrest)   rm -f "$lua_dir/SitMeansRest.lua" ;;
+            sod)           rm -f "$lua_dir/SOD.lua" ;;
             unlimitedammo) rm -f "$lua_dir/UnlimitedAmmo.lua" ;;
-            levelupreward|exchangenpc|sod)
+            levelupreward|exchangenpc)
                 local f
                 for f in "${generic_deployed_files[@]}"; do
                     rm -f "$lua_dir/$f" 2>/dev/null || true
@@ -4360,11 +4383,11 @@ _get_about_text() {
             ;;
         sod)
             printf '%s\n' \
-                'Awards a tiered XP bonus buff mimicking the Season of' \
-                'Discovery Discoverer Delight experience. Applies bonuses' \
-                'from +50% to +300% based on player level range, using custom' \
-                'spell IDs 80865 through 80870. Requires the matching spell' \
-                'data to be present on the server.'
+                'Tiered Discoverer'"'"'s Delight XP bonus sourced from the' \
+                'Dad'"'"'s MMO Lab ALE-Pub collection. Applies +300% at 1-10,' \
+                'stepping down through +250/200/150/100/50% to level 79.' \
+                'Level 80 receives no buff. Auto-refreshes on level-up if' \
+                'removed mid-session. Requires spell IDs 80865-80870 in DB.'
             ;;
         sitmeanrest)
             printf '%s\n' \
