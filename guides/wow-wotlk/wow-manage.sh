@@ -618,7 +618,7 @@ _cmd_block_for() {
         exchangenpc)
             printf '%s\n' \
                 'Exchange NPC (ALE)' \
-                'Spawns up to three configurable exchange NPCs: Roboto (item-for-item with mail delivery), Shadow Priest Hacki (honor-to-gold), and Construct (PvP token vendor). Sourced from the Dad'"'"'s MMO Lab ALE-Pub collection — bugs fixed and hardened for ALE.' \
+                'Spawns up to three configurable exchange NPCs: Roboto (item-for-item with mail delivery), Shadow Priest Hacki (honor-to-gold), and Construct (PvP token vendor). Sourced from the Dad'"'"'s MMO Lab ALE-Kegs collection — bugs fixed and hardened for ALE.' \
                 '' \
                 'Commands: (none — all interaction is through NPC gossip menus)' \
                 '' \
@@ -643,7 +643,9 @@ _cmd_block_for() {
         sod)
             printf '%s\n' \
                 'Season of Discovery Buff (ALE)' \
-                'Tiered Discoverer'"'"'s Delight XP bonus that scales down as players level. Awards +300% at levels 1-10, stepping down to +50% at 71-79. Level 80 gets no buff. Auto-updates on level-up. Sourced from the Dad'"'"'s MMO Lab ALE-Pub collection.' \
+                'Tiered Discoverer'"'"'s Delight XP bonus that scales down as players level. Awards +300% at levels 1-10, stepping down to +50% at 71-79. Level 80 gets no buff. Auto-updates on level-up. Requires server DBC files and client MPQ patches — installed automatically. Sourced from the Dad'"'"'s MMO Lab ALE-Kegs collection.' \
+                '' \
+                'Files required: Server Files/dbc/*.dbc (server), Client Files/data/Patch-Z.MPQ + enUS/patch-enUS-3.MPQ + Interface/Icons/Buff_SoD.blp (client)' \
                 '' \
                 'Commands: (none — buff applied automatically on login and level-up)'
             ;;
@@ -2364,6 +2366,73 @@ copy_client_interface() {
     fi
 }
 
+# Copy files from a Data/ source tree into the WoW client's Data/ directory.
+# Handles MPQ patches and loose Data files (NOT Interface/ content).
+# Usage: copy_client_data <src_data_dir> [description]
+# src_data_dir should contain items like Patch-Z.MPQ, enUS/, etc.
+copy_client_data() {
+    local src_dir="$1" desc="${2:-Data files}"
+    if ! detect_wow_client; then
+        print_info "Manual install: merge ${CYAN}$src_dir${RST} → <WoW>/Data/"
+        return 1
+    fi
+    local dest="$WOW_CLIENT_DIR/Data"
+    if [ ! -d "$src_dir" ]; then
+        print_warning "Data source not found: $src_dir"
+        print_info "Manual: cp -r \"$src_dir/.\" \"$dest/\""
+        return 1
+    fi
+    mkdir -p "$dest"
+    if cp -r "$src_dir/." "$dest/"; then
+        print_success "$desc copied → $dest"
+        return 0
+    else
+        print_warning "Copy failed — install manually:"
+        print_info "  cp -r \"$src_dir/.\" \"$dest/\""
+        return 1
+    fi
+}
+
+# Copy custom DBC files into the AzerothCore server container.
+# Usage: copy_server_dbc <src_dbc_dir> [description]
+# Uses docker cp when worldserver is running; falls back to host path.
+copy_server_dbc() {
+    local src_dir="$1" desc="${2:-DBC files}"
+    if [ ! -d "$src_dir" ]; then
+        print_warning "DBC source not found: $src_dir"
+        return 1
+    fi
+    if container_running "$WORLD_CONTAINER"; then
+        local f
+        local _ok=true
+        for f in "$src_dir"/*.dbc; do
+            [ -f "$f" ] || continue
+            if ! docker cp "$f" "$WORLD_CONTAINER:/azerothcore/env/dist/data/dbc/"; then
+                print_warning "docker cp failed for $(basename "$f")"
+                _ok=false
+            fi
+        done
+        if [ "$_ok" = true ]; then
+            print_success "$desc copied into container → /azerothcore/env/dist/data/dbc/"
+            print_info "Restart the worldserver for DBC changes to take effect."
+            return 0
+        fi
+    fi
+    # Fallback: copy to host data dir (picked up on next container start)
+    local host_dbc="$SERVER_DIR/env/dist/data/dbc"
+    mkdir -p "$host_dbc"
+    if cp "$src_dir"/*.dbc "$host_dbc/" 2>/dev/null; then
+        print_success "$desc copied → $host_dbc"
+        print_info "Restart the worldserver for DBC changes to take effect."
+        return 0
+    else
+        print_warning "DBC copy failed — install manually:"
+        print_info "  cp \"$src_dir\"/*.dbc \"$host_dbc/\""
+        print_info "  OR: docker cp <file>.dbc $WORLD_CONTAINER:/azerothcore/env/dist/data/dbc/"
+        return 1
+    fi
+}
+
 # Interactive: set or change the WoW client folder.
 # Called from the main menu (option 16) and optionally from first-run.
 configure_wow_client() {
@@ -3227,7 +3296,7 @@ ale_deploy_lua_files() {
             fi
             ;;
         exchangenpc)
-            local exc_src="$clone_dir/guides/wow-wotlk/ALE-Pub/ExchangeNPC/ExchangeNpc.lua"
+            local exc_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/ExchangeNPC/ExchangeNpc.lua"
             if [ -f "$exc_src" ]; then
                 cp "$exc_src" "$lua_dir/" && \
                     print_success "Deployed ExchangeNpc.lua → lua_scripts/" || \
@@ -3293,7 +3362,7 @@ ale_deploy_lua_files() {
             ;;
         sod)
             # Script lives in a subdirectory of the dads-mmo-lab repo
-            local sod_src="$clone_dir/guides/wow-wotlk/ALE-Pub/SeasonOfDiscovery/SOD.lua"
+            local sod_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/SeasonOfDiscovery/SOD.lua"
             if [ -f "$sod_src" ]; then
                 cp "$sod_src" "$lua_dir/" && \
                     print_success "Deployed SOD.lua → lua_scripts/" || \
@@ -3339,7 +3408,50 @@ ale_script_install() {
     print_step "Installing ALE script: $name"
 
     mkdir -p "$SERVER_DIR/ale_scripts"
-    if ale_script_is_installed "$key"; then
+
+    # For scripts sourced from a subfolder of dads-mmo-lab, check for the
+    # actual source file rather than relying on .git presence.
+    local _dml_src=""
+    case "$key" in
+        sod)         _dml_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/SeasonOfDiscovery/SOD.lua" ;;
+        exchangenpc) _dml_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/ExchangeNPC/ExchangeNpc.lua" ;;
+    esac
+
+    if [ -n "$_dml_src" ]; then
+        # dads-mmo-lab subfolder script
+        if [ -f "$_dml_src" ]; then
+            print_info "Staged files found — updating from remote if possible..."
+            if [ -d "$clone_dir/.git" ]; then
+                git -C "$clone_dir" pull --depth=1 origin HEAD --quiet 2>/dev/null || \
+                    print_warning "git pull failed — using existing staged files"
+            fi
+        else
+            # No files yet — sparse clone
+            [ -d "$clone_dir" ] && rm -rf "$clone_dir"
+            local _sparse_path
+            case "$key" in
+                sod)         _sparse_path="guides/wow-wotlk/ALE-Kegs/SeasonOfDiscovery" ;;
+                exchangenpc) _sparse_path="guides/wow-wotlk/ALE-Kegs/ExchangeNPC" ;;
+            esac
+            mkdir -p "$clone_dir"
+            if ! git -C "$clone_dir" init -q || \
+               ! git -C "$clone_dir" remote add origin "$url"; then
+                rm -rf "$clone_dir"
+                print_error "Clone init failed for $name!"
+                return 1
+            fi
+            git -C "$clone_dir" config core.sparseCheckout true
+            mkdir -p "$clone_dir/.git/info"
+            printf '%s/\n' "$_sparse_path" > "$clone_dir/.git/info/sparse-checkout"
+            if ! git -C "$clone_dir" pull --depth=1 origin HEAD --quiet; then
+                rm -rf "$clone_dir"
+                print_error "Sparse fetch failed for $name!"
+                print_info "Ensure the files have been pushed to: $url"
+                return 1
+            fi
+            print_success "Fetched $name"
+        fi
+    elif ale_script_is_installed "$key"; then
         print_info "Already cloned — pulling latest..."
         (cd "$clone_dir" && git pull --depth=1 origin HEAD --quiet 2>/dev/null) || \
             print_warning "git pull failed — using existing copy"
@@ -3348,38 +3460,11 @@ ale_script_install() {
             print_warning "Removing incomplete clone at $clone_dir"
             rm -rf "$clone_dir"
         fi
-        case "$key" in
-            sod|exchangenpc)
-                # Lives in a subdirectory of dads-mmo-lab — sparse checkout only that folder.
-                local _sparse_path
-                case "$key" in
-                    sod)         _sparse_path="guides/wow-wotlk/ALE-Pub/SeasonOfDiscovery" ;;
-                    exchangenpc) _sparse_path="guides/wow-wotlk/ALE-Pub/ExchangeNPC" ;;
-                esac
-                mkdir -p "$clone_dir"
-                if ! git -C "$clone_dir" init -q || \
-                   ! git -C "$clone_dir" remote add origin "$url"; then
-                    rm -rf "$clone_dir"
-                    print_error "Clone failed for $name!"
-                    return 1
-                fi
-                git -C "$clone_dir" config core.sparseCheckout true
-                mkdir -p "$clone_dir/.git/info"
-                printf '%s/\n' "$_sparse_path" > "$clone_dir/.git/info/sparse-checkout"
-                if ! git -C "$clone_dir" pull --depth=1 origin HEAD --quiet; then
-                    rm -rf "$clone_dir"
-                    print_error "Sparse fetch failed for $name!"
-                    return 1
-                fi
-                ;;
-            *)
-                if ! git clone --depth 1 "$url" "$clone_dir"; then
-                    rm -rf "$clone_dir"
-                    print_error "Clone failed for $name!"
-                    return 1
-                fi
-                ;;
-        esac
+        if ! git clone --depth 1 "$url" "$clone_dir"; then
+            rm -rf "$clone_dir"
+            print_error "Clone failed for $name!"
+            return 1
+        fi
         print_success "Cloned $name"
     fi
 
@@ -3422,7 +3507,7 @@ ale_script_install() {
             echo ""
             print_warning "Exchange NPC requires world SQL to be applied before the NPCs will work."
             local _exchangenpc_sql_ok=false
-            local _exc_sql_dir="$clone_dir/guides/wow-wotlk/ALE-Pub/ExchangeNPC/database/world"
+            local _exc_sql_dir="$clone_dir/guides/wow-wotlk/ALE-Kegs/ExchangeNPC/database/world"
             local _exc_sql_up="$_exc_sql_dir/ExchangeNpc_Up.sql"
             if [ ! -f "$_exc_sql_up" ]; then
                 print_warning "SQL file not found at: $_exc_sql_up"
@@ -3495,9 +3580,37 @@ ale_script_install() {
             ;;
         sod)
             echo ""
-            print_step "Season of Discovery — Server-Side Only"
-            echo -e "${WHITE}SoD is a server-side Lua mod — no WoW client files are required.${RST}"
-            echo -e "${DIM}The server automatically applies buffs and class changes on login.${RST}"
+            print_step "Season of Discovery — File Installation"
+            local _sod_base="$clone_dir/guides/wow-wotlk/ALE-Kegs/SeasonOfDiscovery"
+            # ── Server DBC files ─────────────────────────────────
+            echo -e "${WHITE}SoD uses custom spells (IDs 80865-80870) that require server DBC files.${RST}"
+            echo ""
+            if ask_yes_no "Auto-install SoD DBC files to worldserver now?"; then
+                copy_server_dbc "$_sod_base/Server Files/dbc" "SoD server DBC files"
+            else
+                print_info "Manual: copy Server Files/dbc/*.dbc into your server's dbc/ folder"
+                print_info "  docker cp <file>.dbc $WORLD_CONTAINER:/azerothcore/env/dist/data/dbc/"
+            fi
+            echo ""
+            # ── Client Data files (MPQ patches) ──────────────────
+            echo -e "${WHITE}SoD also requires client-side MPQ patches for spell visuals and icons.${RST}"
+            echo -e "${DIM}Files: Patch-Z.MPQ, enUS/patch-enUS-3.MPQ${RST}"
+            echo ""
+            if ask_yes_no "Auto-install SoD client Data files to WoW client now?"; then
+                copy_client_data "$_sod_base/Client Files/data" "SoD client data (MPQ patches)"
+            else
+                print_info "Manual: copy Client Files/data/ contents → <WoW>/Data/"
+                print_info "  Patch-Z.MPQ → <WoW>/Data/Patch-Z.MPQ"
+                print_info "  enUS/patch-enUS-3.MPQ → <WoW>/Data/enUS/patch-enUS-3.MPQ"
+            fi
+            echo ""
+            # ── Client Interface icon ─────────────────────────────
+            echo -e "${WHITE}SoD also includes a custom buff icon for the client.${RST}"
+            if ask_yes_no "Auto-install SoD buff icon to WoW Interface/Icons/?"; then
+                copy_client_interface "$_sod_base/Client Files/Interface" "SoD buff icon"
+            else
+                print_info "Manual: copy Client Files/Interface/Icons/Buff_SoD.blp → <WoW>/Interface/Icons/"
+            fi
             ;;
         sitmeanrest)
             echo ""
@@ -4600,7 +4713,7 @@ _get_about_text() {
         exchangenpc)
             printf '%s\n' \
                 'Three configurable exchange NPCs sourced from the Dad'"'"'s MMO' \
-                'Lab ALE-Pub collection. Roboto swaps items via mail; Shadow' \
+                'Lab ALE-Kegs collection. Roboto swaps items via mail; Shadow' \
                 'Priest Hacki converts honor to gold; Construct sells PvP gear' \
                 'tokens. Bugs fixed (undefined variable crash, wrong mail qty,' \
                 'nil spawn handling). Token NPC off by default. Requires SQL.'
@@ -4648,10 +4761,11 @@ _get_about_text() {
         sod)
             printf '%s\n' \
                 'Tiered Discoverer'"'"'s Delight XP bonus sourced from the' \
-                'Dad'"'"'s MMO Lab ALE-Pub collection. Applies +300% at 1-10,' \
+                'Dad'"'"'s MMO Lab ALE-Kegs collection. Applies +300% at 1-10,' \
                 'stepping down through +250/200/150/100/50% to level 79.' \
-                'Level 80 receives no buff. Auto-refreshes on level-up if' \
-                'removed mid-session. Requires spell IDs 80865-80870 in DB.'
+                'Level 80 receives no buff. Auto-refreshes on level-up.' \
+                'Requires server DBC files (custom spells 80865-80870) AND' \
+                'client MPQ patches + icon — all installed automatically.'
             ;;
         sitmeanrest)
             printf '%s\n' \
