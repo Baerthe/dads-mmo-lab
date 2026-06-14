@@ -399,9 +399,6 @@ _offer_npc_in_capitals() {
         190010)  slot=0 ;;
         999991)  slot=1 ;;
         601026)  slot=2 ;;
-        1116001) slot=3 ;;
-        90100)   slot=4 ;;
-        2069430) slot=5 ;;
         *)       slot="${_NPC_SPAWN_IDX:-0}" ;;
     esac
     _NPC_SPAWN_IDX=$((_NPC_SPAWN_IDX + 1))
@@ -455,6 +452,37 @@ _cmd_block_for() {
                 'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
                 'npc add 999991 0 -8828.3 630.2 94.1 3.7   — Stormwind Arena Battlemaster (Alliance)' \
                 'npc add 999991 1 1600.2 -4413.7 17.5 4.5  — Orgrimmar Arena Battlemaster (Horde)'
+            ;;
+        mod-arac)
+            printf '%s\n' \
+                'All Races All Classes (ARAC)' \
+                'Unlocks all race/class combinations not normally available — Night Elf Warrior, Undead Paladin, etc. DATA-ONLY: no worldserver rebuild required. Requires a world DB SQL import and updated DBC files on both server and client.' \
+                '' \
+                'Install requires three steps (configure handles all automatically):' \
+                '  1. Apply arac.sql to acore_world database' \
+                '  2. Copy DBFilesContent DBC files to server data/dbc/ directory' \
+                '  3. Copy Patch-A.MPQ to WoW client Data/ directory' \
+                '' \
+                'WARNING: Back up your database before applying ARAC SQL.' \
+                'Commands: (none — all race/class combos unlocked at character creation)'
+            ;;
+        mod-dungeon-master)
+            printf '%s\n' \
+                'Dungeon Master' \
+                'Procedural roguelike dungeon challenge system. Talk to the Dungeon Master NPC (entry 500000), pick a difficulty tier (Novice → Grandmaster), creature theme, and dungeon — then enter a repopulated instance scaled to your level. Roguelike mode chains dungeons with escalating difficulty, Mythic+-style affixes, and stacking stat buffs.' \
+                '' \
+                '37 dungeons, 9 creature themes, 6 difficulty tiers, party + solo support.' \
+                'NPC auto-spawns in all major cities on server start. SQL auto-applied on next start.' \
+                '' \
+                'GM Commands:' \
+                '[GM] .dm reload           — Reload Dungeon Master config' \
+                '[GM] .dm status           — Show active dungeon sessions' \
+                '[GM] .dm list             — List available dungeons' \
+                '[GM] .dm end              — Force-end active session' \
+                '[GM] .dm clearcooldown    — Clear per-character run cooldown' \
+                '' \
+                'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
+                'npc add 500000            — Dungeon Master NPC (auto-placed in all capitals at start)'
             ;;
         mod-ah-bot)
             printf '%s\n' \
@@ -527,6 +555,18 @@ _cmd_block_for() {
                 'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
                 'npc add 190010 0 -8831.3 628.2 94.1 3.7   — Transmogrifier NPC, Stormwind (Alliance)' \
                 'npc add 190010 1 1597.2 -4415.7 17.5 4.5  — Transmogrifier NPC, Orgrimmar (Horde)'
+            ;;
+        mod-talentbutton)
+            printf '%s\n' \
+                'Talent Button' \
+                'Enables Dual Talent Specialization at level 10 (retail: level 40). Adds a button to unlearn talents from anywhere in the world — no class trainer visit required. Uses server-side script injection to provide seamless in-game UI integration.' \
+                '' \
+                'IMPORTANT: Requires an UNPATCHED WoW 3.3.5a client. Clients patched with tools' \
+                'like RCEPatcher will block the script injection and the button will not appear.' \
+                '' \
+                'Configuration: TalentButton.Enable = 1 in mod_talentbutton.conf' \
+                '' \
+                'Commands: (none — talent reset button available in the in-game talent UI)'
             ;;
         mod-individual-progression)
             printf '%s\n' \
@@ -653,17 +693,6 @@ _cmd_block_for() {
                 '.awplaytime              — Show account-wide play time (primary alias)' \
                 '.accountplaytime         — Show account-wide play time (alternate alias)' \
                 '.awplayed                — Show account-wide played time (alternate alias)'
-            ;;
-        exchangenpc)
-            printf '%s\n' \
-                'Exchange NPC (ALE)' \
-                'Spawns up to three configurable exchange NPCs: Roboto (item-for-item with mail delivery), Shadow Priest Hacki (honor-to-gold), and Construct (PvP token vendor). Sourced from the Dad'"'"'s MMO Lab ALE-Kegs collection — bugs fixed and hardened for ALE.' \
-                '' \
-                'Commands: (none — all interaction is through NPC gossip menus)' \
-                '' \
-                'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
-                'npc add 1116001 0 -8822.3 634.2 94.1 3.7   — Roboto (Exchange NPC), Stormwind (Alliance)' \
-                'npc add 1116001 1 1606.2 -4409.7 17.5 4.5  — Roboto (Exchange NPC), Orgrimmar (Horde)'
             ;;
         activechat)
             printf '%s\n' \
@@ -997,7 +1026,10 @@ declare -a MODULE_REGISTRY=(
     "mod-learn-spells|Learn Spells on Levelup|https://github.com/azerothcore/mod-learn-spells.git|world"
     "mod-npc-beastmaster|NPC Beastmaster (pets for all classes)|https://github.com/azerothcore/mod-npc-beastmaster.git|world,characters"
     "mod-quest-loot-party|Quest Loot Party (quest items drop for all eligible party members)|https://github.com/pangolp/mod-quest-loot-party.git|world"
+    "mod-arac|All Races All Classes (ARAC — data mod: SQL + DBC + MPQ)|https://github.com/heyitsbench/mod-arac.git|world"
+    "mod-dungeon-master|Dungeon Master (roguelike dungeon challenge system)|https://github.com/InstanceForge/mod-dungeon-master.git|world,characters"
     "mod-solocraft|Solocraft (solo dungeon/raid scaling)|https://github.com/azerothcore/mod-solocraft.git|world"
+    "mod-talentbutton|Talent Button (dual-spec at 10 + anywhere talent reset)|https://github.com/brian8544/mod-talentbutton.git|"
     "mod-transmog|Transmogrification|https://github.com/azerothcore/mod-transmog.git|world,characters"
 )
 
@@ -1509,6 +1541,8 @@ server_attach() {
 # module: ls modules/<mod>/data/sql/db-<dbname>/
 # Format: "module-key|database|filename1.sql filename2.sql ..."
 declare -a MODULE_UPDATE_FILES=(
+    "mod-dungeon-master|acore_world|dm_setup.sql"
+    "mod-dungeon-master|acore_characters|dm_characters_setup.sql"
     "mod-ah-bot|acore_world|auctionhousebot_professionItems.sql mod_auctionhousebot.sql"
     "mod-npc-beastmaster|acore_world|beastmaster_tames.sql beastmaster_tames_inserts.sql"
     "mod-transmog|acore_characters|trasmorg.sql"
@@ -1534,8 +1568,6 @@ declare -a ALE_SCRIPT_REGISTRY=(
     "battlepass|Battle Pass System (XP progression + rewards + client addon)|https://github.com/Shonik/lua-battlepass.git"
     # ! DEBUG: Using Baerthe test repo; move to DadsMmoLab/dads-mmo-lab when merged to main
     "bmah|Black Market Auction House (MoP-style BMAH + client addon)|https://github.com/Baerthe/dads-mmo-lab.git|Update-Delta"
-    # ! DEBUG: Set to baerthe repo for now since original author repo is private. Original repo: dads-mmo-lab
-    "exchangenpc|Exchange NPC (configurable item-exchange vendor NPC)|https://github.com/Baerthe/dads-mmo-lab.git|Update-Delta"
     "levelupreward|Level Up Reward (random class-appropriate gear on every level-up)|https://github.com/phreeez/Levelreward.git"
     "lootpet|Loot Pet (vanity pet auto-loots nearby corpses)|https://github.com/Brytenwally/Lootpet.git"
     "paragon|Paragon Anniversary (endless post-80 stat progression + client addon)|https://github.com/Grim-Batol/Paragon-Anniversary.git"
@@ -1862,7 +1894,9 @@ repair_install_state() {
         if [ -z "${repair_files[$i]}" ]; then
             marker=" ${DIM}(manual filename entry needed)${RST}"
         fi
-        printf "  %2d) %s%b\n" "$((i + 1))" "${repair_keys[$i]}" "$marker"
+        local db_label=""
+        [ -n "${repair_dbs[$i]}" ] && db_label=" ${DIM}(${repair_dbs[$i]})${RST}"
+        printf "  %2d) %s%b%b\n" "$((i + 1))" "${repair_keys[$i]}" "$db_label" "$marker"
     done
     echo ""
     echo -e "${WHITE}  A) Repair ALL listed modules${RST}"
@@ -1969,11 +2003,22 @@ module_remove() {
         return 0
     fi
 
+    if [ "$key" = "mod-arac" ]; then
+        print_warning "mod-arac is data-only. Removing the clone does NOT revert:"
+        print_info "  • arac.sql data already imported into acore_world"
+        print_info "  • DBC files already copied to the server data volume"
+        print_info "  • Patch-A.MPQ already installed in your WoW client Data/"
+        print_info "To fully uninstall ARAC, those must be reverted manually."
+        echo ""
+    fi
+
     if ask_yes_no "  Remove module files from $SERVER_DIR/modules/$key?"; then
         rm -rf "$SERVER_DIR/modules/$key"
         print_success "Module files removed"
-        print_info "(Database tables/rows from this module are kept — removing"
-        print_info " them risks data loss and they're harmless to leave.)"
+        if [ "$key" != "mod-arac" ]; then
+            print_info "(Database tables/rows from this module are kept — removing"
+            print_info " them risks data loss and they're harmless to leave.)"
+        fi
     fi
 }
 
@@ -2371,6 +2416,177 @@ configure_module_npc_beastmaster() {
 }
 
 # ─────────────────────────────────────────────────────────────
+# configure_module_dungeon_master
+#   Copies mod_dungeon_master.conf.dist → mod_dungeon_master.conf
+#   and opens it for editing.
+# ─────────────────────────────────────────────────────────────
+configure_module_dungeon_master() {
+    print_step "Configuring Dungeon Master"
+    local module_dir="$SERVER_DIR/modules/mod-dungeon-master"
+    if [ ! -d "$module_dir" ]; then
+        print_error "Dungeon Master module not installed (expected at $module_dir)."
+        return 1
+    fi
+    local conf_dist="$module_dir/conf/mod_dungeon_master.conf.dist"
+    local conf_dest="$SERVER_DIR/env/dist/etc/modules/mod_dungeon_master.conf"
+    mkdir -p "$SERVER_DIR/env/dist/etc/modules"
+    if [ ! -f "$conf_dest" ]; then
+        if [ -f "$conf_dist" ]; then
+            cp "$conf_dist" "$conf_dest"
+            print_success "Created $conf_dest"
+        else
+            print_warning "conf.dist not found at $conf_dist"
+            print_info "The worldserver must be rebuilt once before conf files are generated."
+            print_info "After rebuilding, re-run this configure option."
+            return 0
+        fi
+    fi
+    echo ""
+    print_info "Key settings: Scaling.LevelBand, Rewards.BaseGold, Roguelike.Enable"
+    print_info "NPC entry 500000 spawns automatically in all major cities on server start."
+    echo ""
+    _open_text_file "$conf_dest"
+    echo ""
+    print_info "Restart the worldserver for conf changes to take effect."
+}
+
+# ─────────────────────────────────────────────────────────────
+# configure_module_talentbutton
+#   Copies mod_talentbutton.conf.dist → mod_talentbutton.conf
+#   and opens it for editing.
+# ─────────────────────────────────────────────────────────────
+configure_module_talentbutton() {
+    print_step "Configuring Talent Button"
+    local module_dir="$SERVER_DIR/modules/mod-talentbutton"
+    if [ ! -d "$module_dir" ]; then
+        print_error "Talent Button module not installed (expected at $module_dir)."
+        return 1
+    fi
+    local conf_dist="$module_dir/conf/mod_talentbutton.conf.dist"
+    local conf_dest="$SERVER_DIR/env/dist/etc/modules/mod_talentbutton.conf"
+    mkdir -p "$SERVER_DIR/env/dist/etc/modules"
+    if [ ! -f "$conf_dest" ]; then
+        if [ -f "$conf_dist" ]; then
+            cp "$conf_dist" "$conf_dest"
+            print_success "Created $conf_dest"
+        else
+            print_warning "conf.dist not found at $conf_dist"
+            print_info "The worldserver must be rebuilt once before conf files are generated."
+            print_info "After rebuilding, re-run this configure option."
+            return 0
+        fi
+    fi
+    echo ""
+    print_warning "Requires an UNPATCHED WoW 3.3.5a client — RCEPatcher clients will not see the button."
+    echo ""
+    _open_text_file "$conf_dest"
+    echo ""
+    print_info "Restart the worldserver for conf changes to take effect."
+}
+
+# ─────────────────────────────────────────────────────────────
+# configure_mod_arac
+#   Applies ARAC SQL, copies server DBC files, and offers to
+#   install Patch-A.MPQ to the WoW client Data/ directory.
+#   mod-arac is data-only — no worldserver rebuild required.
+# ─────────────────────────────────────────────────────────────
+configure_mod_arac() {
+    print_step "Configuring All Races All Classes (ARAC)"
+    local module_dir="$SERVER_DIR/modules/mod-arac"
+    if [ ! -d "$module_dir" ]; then
+        print_error "mod-arac not installed (expected at $module_dir)."
+        return 1
+    fi
+    refresh_container_names
+    local arac_marker="$SERVER_DIR/modules/mod-arac/.arac_sql_applied"
+    # ── Step 1: SQL ───────────────────────────────────────────
+    local arac_sql="$module_dir/data/sql/db-world/arac.sql"
+    if [ ! -f "$arac_sql" ]; then
+        print_error "arac.sql not found at: $arac_sql"
+        return 1
+    fi
+    echo ""
+    print_step "ARAC — Step 1: Apply SQL to acore_world"
+    if [ -f "$arac_marker" ]; then
+        print_info "ARAC SQL was previously applied (marker file present)."
+        if ! ask_yes_no "Re-apply arac.sql anyway? (only needed after a DB wipe)"; then
+            print_info "SQL step skipped."
+        else
+            if ! ensure_db_running; then
+                print_error "Database is not available — start the server first."
+                return 1
+            fi
+            if ale_run_sql_file "acore_world" "$arac_sql"; then
+                touch "$arac_marker"
+                print_success "ARAC SQL re-applied."
+            else
+                print_error "SQL apply failed — check DB logs."
+                return 1
+            fi
+        fi
+    else
+        print_warning "Back up your database before applying ARAC SQL (it modifies race/class unlock data)."
+        echo ""
+        if ask_yes_no "Apply arac.sql to acore_world database now?"; then
+            if ! ensure_db_running; then
+                print_error "Database is not available — start the server first."
+                return 1
+            fi
+            if ale_run_sql_file "acore_world" "$arac_sql"; then
+                touch "$arac_marker"
+                print_success "ARAC SQL applied to acore_world."
+            else
+                print_error "SQL apply failed — check DB logs."
+                return 1
+            fi
+        else
+            print_info "SQL skipped. Run manually: docker exec -i \$DB_CONTAINER mysql -uroot -p... acore_world < arac.sql"
+        fi
+    fi
+    # ── Step 2: Server DBC files ──────────────────────────────
+    echo ""
+    print_step "ARAC — Step 2: Copy DBC files to server"
+    local dbc_src="$module_dir/patch-contents/DBFilesContent"
+    if [ -d "$dbc_src" ]; then
+        if ask_yes_no "Copy ARAC DBC files to server data/dbc/ now?"; then
+            copy_server_dbc "$dbc_src" "ARAC server DBC files"
+        else
+            print_info "DBC copy skipped. Copy manually:"
+            print_info "  docker run --rm -v ac-client-data:/data -v $dbc_src:/src:ro alpine sh -c 'cp /src/*.dbc /data/dbc/'"
+        fi
+    else
+        print_warning "DBC source not found at: $dbc_src"
+        print_info "Try re-installing to refresh the clone."
+    fi
+    # ── Step 3: Client Patch-A.MPQ ────────────────────────────
+    echo ""
+    print_step "ARAC — Step 3: Install Patch-A.MPQ to WoW client"
+    local mpq_src="$module_dir/Patch-A.MPQ"
+    if [ -f "$mpq_src" ]; then
+        echo -e "${WHITE}Patch-A.MPQ must be placed in your WoW client Data/ directory.${RST}"
+        if ask_yes_no "Auto-install Patch-A.MPQ to WoW client Data/ now?"; then
+            if detect_wow_client; then
+                local mpq_dest="$WOW_CLIENT_DIR/Data/Patch-A.MPQ"
+                if cp "$mpq_src" "$mpq_dest"; then
+                    print_success "Patch-A.MPQ installed → $mpq_dest"
+                else
+                    print_error "Copy failed — check permissions on $WOW_CLIENT_DIR/Data/"
+                fi
+            fi
+        else
+            print_info "Manual install: copy $mpq_src"
+            print_info "  to your WoW client Data/ directory."
+        fi
+    else
+        print_warning "Patch-A.MPQ not found at: $mpq_src"
+        print_info "Download it manually from: https://github.com/heyitsbench/mod-arac"
+    fi
+    echo ""
+    print_info "mod-arac is data-only — no worldserver rebuild is required."
+    print_info "Restart the worldserver to load the new race/class combinations."
+}
+
+# ─────────────────────────────────────────────────────────────
 # ALE LUA SCRIPT MANAGEMENT
 # ─────────────────────────────────────────────────────────────
 # Lua scripts that extend gameplay via the ALE engine.
@@ -2392,7 +2608,6 @@ ale_lua_is_deployed() {
         accountwide)   [ -d "$lua_dir/accountwide" ] && \
                         ls "$lua_dir/accountwide"/*.lua &>/dev/null ;;
         levelupreward) ls "$lua_dir"/levelreward.lua &>/dev/null 2>&1 ;;
-        exchangenpc)   [ -f "$lua_dir/ExchangeNpc.lua" ] ;;
         activechat)    [ -d "$lua_dir/AzerothChatter" ] ;;
         battlepass)    [ -d "$lua_dir/battlepass" ] ;;
         paragon)       [ -d "$lua_dir/paragon" ] ;;
@@ -3336,16 +3551,6 @@ ale_deploy_lua_files() {
                 print_warning "No .lua files found in clone root — check $clone_dir"
             fi
             ;;
-        exchangenpc)
-            local exc_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/ExchangeNPC/ExchangeNpc.lua"
-            if [ -f "$exc_src" ]; then
-                cp "$exc_src" "$lua_dir/" && \
-                    print_success "Deployed ExchangeNpc.lua → lua_scripts/" || \
-                    print_warning "Copy failed — check $exc_src"
-            else
-                print_warning "ExchangeNpc.lua not found at expected path: $exc_src"
-            fi
-            ;;
         activechat)
             # Upstream layout: AzerothChatter/ subdirectory
             # ALE detects duplicate basenames across subdirs — data/chatter.lua vs logic/chatter.lua
@@ -3474,7 +3679,6 @@ ale_script_install() {
     local _dml_src=""
     case "$key" in
         sod)         _dml_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/SeasonOfDiscovery/SOD.lua" ;;
-        exchangenpc) _dml_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/ExchangeNPC/ExchangeNpc.lua" ;;
         bmah)        _dml_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/BMAH.lua" ;;
     esac
 
@@ -3492,7 +3696,6 @@ ale_script_install() {
             local _sparse_path
             case "$key" in
                 sod)         _sparse_path="guides/wow-wotlk/ALE-Kegs/SeasonOfDiscovery" ;;
-                exchangenpc) _sparse_path="guides/wow-wotlk/ALE-Kegs/ExchangeNPC" ;;
                 bmah)        _sparse_path="guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse" ;;
             esac
             mkdir -p "$clone_dir"
@@ -3564,33 +3767,6 @@ ale_script_install() {
             else
                 print_info "Reconfigure anytime from the ALE Scripts menu → c on Accountwide."
             fi
-            ;;
-        exchangenpc)
-            echo ""
-            print_step "Exchange NPC — SQL setup"
-            local _exc_sql_dir="$clone_dir/guides/wow-wotlk/ALE-Kegs/ExchangeNPC/database/world"
-            local _exc_sql_up="$_exc_sql_dir/ExchangeNpc_Up.sql"
-            if [ ! -f "$_exc_sql_up" ]; then
-                print_warning "SQL file not found at: $_exc_sql_up"
-                print_info "The sparse checkout may be incomplete. Try re-installing."
-            else
-                if ensure_db_running; then
-                    if ale_run_sql_file "acore_world" "$_exc_sql_up"; then
-                        print_success "Exchange NPC SQL applied."
-                    else
-                        print_warning "SQL apply failed — check DB logs or run option 6 in Server Maintenance."
-                    fi
-                else
-                    print_warning "Database not available. Apply SQL manually when DB is running."
-                fi
-            fi
-            echo ""
-            fix_exchangenpc_npc
-            echo ""
-            print_info "After restarting the server, spawn the NPCs in-game:"
-            _offer_npc_in_capitals 1116001 "Roboto (Item Exchange)" \
-                "Restart the server first — creature_template must reload."
-            _offer_npc_in_capitals 1116002 "Shadow Priest Hacki (Honor Exchange)" ""
             ;;
         battlepass)
             echo ""
@@ -3769,7 +3945,6 @@ ale_script_remove() {
         bmah)        deployed_hint="$lua_dir/BMAH.lua" ;;
         lootpet)     deployed_hint="$lua_dir/LootPet.lua" ;;
         sitmeanrest)  deployed_hint="$lua_dir/SitMeansRest.lua" ;;
-        exchangenpc) deployed_hint="$lua_dir/ExchangeNpc.lua" ;;
         sod)         deployed_hint="$lua_dir/SOD.lua" ;;
         unlimitedammo) deployed_hint="$lua_dir/UnlimitedAmmo.lua" ;;
         *)           deployed_hint="$lua_dir/ (search for files from this script)" ;;
@@ -3787,7 +3962,6 @@ ale_script_remove() {
             lootpet)     rm -f  "$lua_dir/LootPet.lua" ;;
             sitmeanrest)   rm -f "$lua_dir/SitMeansRest.lua" ;;
             sod)           rm -f "$lua_dir/SOD.lua" ;;
-            exchangenpc)   rm -f "$lua_dir/ExchangeNpc.lua" ;;
             unlimitedammo) rm -f "$lua_dir/UnlimitedAmmo.lua" ;;
             levelupreward)
                 local f
@@ -4810,14 +4984,6 @@ _get_about_text() {
                 'Mail → Plate at 40). First level-up also teaches all class' \
                 'weapon proficiencies. Built natively for mod-ale.'
             ;;
-        exchangenpc)
-            printf '%s\n' \
-                'Three configurable exchange NPCs sourced from the Dad'"'"'s MMO' \
-                'Lab ALE-Kegs collection. Roboto swaps items via mail; Shadow' \
-                'Priest Hacki converts honor to gold; Construct sells PvP gear' \
-                'tokens. Bugs fixed (undefined variable crash, wrong mail qty,' \
-                'nil spawn handling). Token NPC off by default. Requires SQL.'
-            ;;
         activechat)
             printf '%s\n' \
                 'Fills world chat with ambient lore-grounded RP chatter from' \
@@ -5230,6 +5396,28 @@ _module_post_install_hook() {
             _offer_npc_in_capitals 999991 "Arena Battlemaster 1v1" \
                 "Run these commands after rebuilding and starting the worldserver."
             ;;
+        mod-arac)
+            echo ""
+            print_info "Run Configure (c) to apply SQL, copy server DBC files, and install Patch-A.MPQ."
+            if ask_yes_no "Configure ARAC now?"; then
+                configure_mod_arac
+            fi
+            ;;
+        mod-dungeon-master)
+            echo ""
+            print_info "Dungeon Master SQL will be auto-applied on next server start."
+            print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
+            if ask_yes_no "Configure Dungeon Master now?"; then configure_module_dungeon_master; fi
+            echo ""
+            print_info "Dungeon Master NPC (entry 500000) spawns automatically in all major cities."
+            print_info "You can also place one manually anywhere with: .npc add 500000"
+            ;;
+        mod-talentbutton)
+            echo ""
+            print_warning "Talent Button requires an UNPATCHED WoW 3.3.5a client (RCEPatcher blocks script injection)."
+            print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
+            if ask_yes_no "Configure Talent Button now?"; then configure_module_talentbutton; fi
+            ;;
     esac
 }
 
@@ -5387,19 +5575,26 @@ menu_modules() {
                 print_header
                 module_install "$key" "$name" "$url" "$sql_dirs" || true
                 upsert_mod_commands "$key"
-                print_info "Module cloned. SQL files will be applied automatically on next server start."
-                print_info "All C++ modules require a worldserver rebuild before they can load."
-                print_info "Conf files can be set up via 'Configure' — run configure after a rebuild if"
-                print_info "the conf.dist files are not yet present."
-
-                if [ "$SERVER_TYPE" = "playerbots" ]; then
-                    print_info "Rebuild the worldserver to compile the new module in."
-                    echo ""
-                    if ask_yes_no "Rebuild the worldserver now?"; then
-                        rebuild_worldserver
-                    fi
+                if [ "$key" = "mod-arac" ]; then
+                    print_info "mod-arac cloned. This is a data-only mod — NO REBUILD REQUIRED."
+                    print_info "Run Configure (c) to apply SQL, copy server DBC files, and install the client MPQ."
                 else
-                    print_info "(Skipping rebuild — not supported on this install type.)"
+                    print_info "Module cloned. SQL files will be applied automatically on next server start."
+                    print_info "All C++ modules require a worldserver rebuild before they can load."
+                    print_info "Conf files can be set up via 'Configure' — run configure after a rebuild if"
+                    print_info "the conf.dist files are not yet present."
+                fi
+
+                if [ "$key" != "mod-arac" ]; then
+                    if [ "$SERVER_TYPE" = "playerbots" ]; then
+                        print_info "Rebuild the worldserver to compile the new module in."
+                        echo ""
+                        if ask_yes_no "Rebuild the worldserver now?"; then
+                            rebuild_worldserver
+                        fi
+                    else
+                        print_info "(Skipping rebuild — not supported on this install type.)"
+                    fi
                 fi
 
                 _module_post_install_hook "$key"
@@ -5442,10 +5637,13 @@ menu_modules() {
                 case "$key" in
                     mod-ah-bot)                  configure_ahbot ;;
                     mod-ale)                     configure_ale ;;
+                    mod-arac)                    configure_mod_arac ;;
                     mod-challenge-modes)         configure_module_challenge_modes ;;
+                    mod-dungeon-master)          configure_module_dungeon_master ;;
                     mod-player-bot-level-brackets) configure_module_bot_level_brackets ;;
                     mod-npc-beastmaster)         configure_module_npc_beastmaster ;;
                     mod-quest-loot-party)        configure_module_quest_loot_party ;;
+                    mod-talentbutton)            configure_module_talentbutton ;;
                     *)
                         print_info "$name has no dedicated configure option."
                         print_info "Edit its .conf file in $SERVER_DIR/env/dist/etc/modules/ directly."
@@ -5478,6 +5676,9 @@ _module_conf_name() {
         mod-aoe-loot)                   echo "mod_aoe_loot.conf" ;;
         mod-ah-bot)                     echo "mod_ahbot.conf" ;;
         mod-autobalance)                echo "AutoBalance.conf" ;;
+        mod-arac)                       echo "" ;;
+        mod-dungeon-master)             echo "mod_dungeon_master.conf" ;;
+        mod-talentbutton)               echo "mod_talentbutton.conf" ;;
         mod-ale)                        echo "mod_ale.conf" ;;
         mod-player-bot-level-brackets)  echo "mod_player_bot_level_brackets.conf" ;;
         mod-challenge-modes)            echo "challenge_modes.conf" ;;
@@ -6191,92 +6392,6 @@ fix_dbimport_table_exists() {
     fi
 }
 
-fix_exchangenpc_npc() {
-    print_step "Fix: Exchange NPC entries (1116001–1116003) in database"
-    echo ""
-    echo -e "${WHITE}Verifies creature_template rows for Roboto (1116001), Shadow Priest${RST}"
-    echo -e "${WHITE}Hacki (1116002), and Construct (1116003) with npcflag=1 and${RST}"
-    echo -e "${WHITE}gossip_menu_id=0 so Eluna gossip works correctly.${RST}"
-    echo ""
-    refresh_container_names
-    sqlmod_init
-    if ! container_running "$DB_CONTAINER"; then
-        print_error "Database container is not running — start the server first."
-        return 1
-    fi
-    local _exc_sql_err
-    _exc_sql_err=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world 2>&1 <<'_EXCNPC_SQL'
-SET foreign_key_checks=0;
-SET sql_mode='';
-DELETE FROM `creature_template` WHERE `entry` IN (1116001,1116002,1116003);
-INSERT INTO `creature_template`
-  (`entry`,`name`,`subname`,`gossip_menu_id`,`minlevel`,`maxlevel`,`exp`,`faction`,`npcflag`,
-   `speed_walk`,`speed_run`,`rank`,`dmgschool`,`DamageModifier`,
-   `BaseAttackTime`,`RangeAttackTime`,`BaseVariance`,`RangeVariance`,
-   `unit_class`,`unit_flags`,`unit_flags2`,`dynamicflags`,
-   `type`,`AIName`,`MovementType`,`HoverHeight`,
-   `HealthModifier`,`ManaModifier`,`ArmorModifier`,`RegenHealth`,`flags_extra`,`VerifiedBuild`)
-VALUES
-  (1116001,'Roboto',             'Trusted Dealer',        0,63,63,0,35,1,1,1.14286,0,0,1,2000,2000,1,1,1,33536,2048,0,2,'',0,1,1.35,1,1,1,2,0),
-  (1116002,'Shadow Priest Hacki','The Honor Melter',      0,63,63,0,35,1,1,1.14286,0,0,1,2000,2000,1,1,1,33536,2048,0,2,'',0,1,1.35,1,1,1,2,0),
-  (1116003,'Construct',          '...has the good stuff', 0,63,63,0,35,1,1,1.14286,0,0,1,2000,2000,1,1,1,33536,2048,0,2,'',0,1,1.35,1,1,1,2,0);
-SET @hasScale=(SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='creature_template' AND COLUMN_NAME='scale');
-SET @sql=IF(@hasScale>0,'UPDATE creature_template SET scale=1.0 WHERE entry IN (1116001,1116002); UPDATE creature_template SET scale=0.7 WHERE entry=1116003','SELECT 1');
-PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
-SET @hasModelTable=(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='creature_template_model');
-SET @sql=IF(@hasModelTable>0,'DELETE FROM creature_template_model WHERE CreatureID IN (1116001,1116002,1116003)','SELECT 1');
-PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
-SET @sql=IF(@hasModelTable>0,'INSERT INTO creature_template_model (CreatureID,Idx,CreatureDisplayID,DisplayScale,Probability,VerifiedBuild) VALUES (1116001,0,1097,1.0,1.0,0),(1116002,0,24207,1.0,1.0,0),(1116003,0,27645,0.7,1.0,0)','SELECT 1');
-PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
-SET @hasModelid1=(SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='creature_template' AND COLUMN_NAME='modelid1');
-SET @sql=IF(@hasModelid1>0,'UPDATE creature_template SET modelid1=1097 WHERE entry=1116001; UPDATE creature_template SET modelid1=24207 WHERE entry=1116002; UPDATE creature_template SET modelid1=27645 WHERE entry=1116003','SELECT 1');
-PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
-DELETE FROM `npc_text` WHERE `ID` IN (92101,92102,92103,92104,92105);
-INSERT INTO `npc_text` (`ID`,`text0_0`,`BroadcastTextID0`,`lang0`,`Probability0`,`em0_0`,`em0_1`,`em0_2`,`em0_3`,`em0_4`,`em0_5`,`BroadcastTextID1`,`lang1`,`Probability1`,`em1_0`,`em1_1`,`em1_2`,`em1_3`,`em1_4`,`em1_5`,`BroadcastTextID2`,`lang2`,`Probability2`,`em2_0`,`em2_1`,`em2_2`,`em2_3`,`em2_4`,`em2_5`,`BroadcastTextID3`,`lang3`,`Probability3`,`em3_0`,`em3_1`,`em3_2`,`em3_3`,`em3_4`,`em3_5`,`BroadcastTextID4`,`lang4`,`Probability4`,`em4_0`,`em4_1`,`em4_2`,`em4_3`,`em4_4`,`em4_5`,`BroadcastTextID5`,`lang5`,`Probability5`,`em5_0`,`em5_1`,`em5_2`,`em5_3`,`em5_4`,`em5_5`,`BroadcastTextID6`,`lang6`,`Probability6`,`em6_0`,`em6_1`,`em6_2`,`em6_3`,`em6_4`,`em6_5`,`BroadcastTextID7`,`lang7`,`Probability7`,`em7_0`,`em7_1`,`em7_2`,`em7_3`,`em7_4`,`em7_5`,`VerifiedBuild`) VALUES
-(92101,'Hello Time Traveler! Chromie has ordered me to provide you with proper tools on your journey, if you can show evidence of being worthy.',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
-(92102,'Are you sure you wish to turn them in?',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
-(92103,'Hello Time Traveler! Chromie has ordered me to reward you for your efforts in faction wars.',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
-(92104,'Are you sure you wish to spend your acquired honor for money? There is no turning back!',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
-(92105,'I am offering Tokens for the most powerful gear, designed for combat against other heroes.',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1);
-DELETE FROM `creature_equip_template` WHERE `CreatureID` IN (1116001,1116002);
-INSERT INTO `creature_equip_template` (`CreatureID`,`ID`,`ItemID1`,`ItemID2`,`ItemID3`,`VerifiedBuild`) VALUES (1116002,1,18609,0,0,18019);
-SET foreign_key_checks=1;
-_EXCNPC_SQL
-)
-    local _exc_rc=$?
-    local _exc_errs; _exc_errs=$(echo "$_exc_sql_err" | grep -v "^mysql: \[Warning\]" | grep -v "^$")
-    if [ $_exc_rc -ne 0 ] || echo "$_exc_errs" | grep -qi "^ERROR"; then
-        print_error "SQL apply failed:"
-        echo "$_exc_sql_err"
-        return 1
-    fi
-    [ -n "$_exc_errs" ] && echo "$_exc_errs"
-    local _exc_verify
-    _exc_verify=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -N -e \
-        "SELECT CONCAT(entry,'=',name) FROM acore_world.creature_template WHERE entry IN (1116001,1116002,1116003) ORDER BY entry;" 2>&1)
-    local _exc_count; _exc_count=$(echo "$_exc_verify" | grep -c "=")
-    if [ "$_exc_count" -eq 3 ]; then
-        print_success "Verified: all 3 entries exist in DB"
-        echo "  $_exc_verify" | tr '\n' '  ' && echo ""
-    else
-        print_error "Verification failed — only $_exc_count/3 entries found. Output: $_exc_verify"
-        return 1
-    fi
-    echo ""
-    if ask_yes_no "Restart the worldserver now to load the new creature_template entries?"; then
-        if [ -z "$WORLD_CONTAINER" ] || ! container_running "$WORLD_CONTAINER"; then
-            print_error "Worldserver container not running — start the server first, then restart manually."
-        elif docker restart "$WORLD_CONTAINER"; then
-            print_success "Worldserver restarted — spawn NPCs with .npc add (see ALE Scripts → c on Exchange NPC)."
-        else
-            print_error "Restart failed. Container: $WORLD_CONTAINER"
-        fi
-    else
-        print_info "Remember to restart the worldserver before spawning."
-        print_info "  Main menu → Restart Server  or:  ${CYAN}docker restart $WORLD_CONTAINER${RST}"
-    fi
-}
-
 fix_battlepass_npc() {
     print_step "Fix: BattlePass NPC (entry 90100) missing from database"
     echo ""
@@ -6368,7 +6483,6 @@ menu_server_maintenance() {
         printf "  ${WHITE}3)${RST} Restore / import a backup\n"
         printf "  ${WHITE}4)${RST} Fix: ac-db-import 'Table already exists' errors\n"
         printf "  ${WHITE}5)${RST} Fix: BattlePass NPC missing (entry 90100)\n"
-        printf "  ${WHITE}6)${RST} Fix: Exchange NPC entries missing (1116001–1116003)\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${DIM}  [ENTER] Back${RST}\n"
 
@@ -6386,9 +6500,8 @@ menu_server_maintenance() {
             3) _maintenance_import ;;
             4) fix_dbimport_table_exists; press_enter ;;
             5) fix_battlepass_npc; press_enter ;;
-            6) fix_exchangenpc_npc; press_enter ;;
             "") return ;;
-            *) print_warning "Enter 1–6 or ENTER to go back."; press_enter ;;
+            *) print_warning "Enter 1–5 or ENTER to go back."; press_enter ;;
         esac
     done
 }
