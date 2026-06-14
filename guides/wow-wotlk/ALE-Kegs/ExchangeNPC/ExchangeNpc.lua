@@ -61,7 +61,7 @@ local function dbg(msg) print('[ExchangeNpc] ' .. tostring(msg)) end
 
 Config.ItemNpcOn  = 1   -- 1 = spawn item-exchange NPC
 Config.HonorNpcOn = 1   -- 1 = spawn honor-to-gold NPC
-Config.TokenNpcOn = 0   -- 1 = spawn PvP token NPC
+Config.TokenNpcOn = 1   -- 1 = spawn PvP token NPC
 
 ------------------------------------------------------------------------------------------------
 -- Item Exchange NPC
@@ -343,7 +343,7 @@ local function eI_TokenOnHello(event, player, creature)
     if not player then return end
     player:GossipClearMenu()
     player:GossipMenuAddItem(OPTION_ICON_CHAT, Config.TokenGossipRefundText, 0, 1000)
-    if not player:HasAchieved(452) and not player:HasAchieved(440) then
+    if not player:IsAchieved(452) and not player:IsAchieved(440) then
         player:SendBroadcastMessage('You need at least 10k honorable kills to buy epic PvP items.')
         player:GossipSendMenu(1, creature)
         return
@@ -376,7 +376,7 @@ local function eI_TokenOnGossipSelect(event, player, object, sender, intid, code
         player:GossipComplete()
         return
     end
-    if intid > 6 and not player:HasAchieved(439) and not player:HasAchieved(451) then
+    if intid > 6 and not player:IsAchieved(439) and not player:IsAchieved(451) then
         player:SendBroadcastMessage('You need at least 20k honorable kills to buy epic PvP weapons.')
         player:GossipComplete()
         return
