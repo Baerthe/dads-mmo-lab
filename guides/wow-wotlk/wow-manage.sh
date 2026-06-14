@@ -2732,6 +2732,9 @@ _BPNPC_SQL
     echo -e "${WHITE}Use ${CYAN}/bp${WHITE} or ${CYAN}/battlepass${WHITE} in WoW chat to open the Battle Pass frame.${RST}"
     echo -e "${WHITE}Server commands: ${CYAN}.bp${WHITE} | ${CYAN}.bp rewards${WHITE} | ${CYAN}.bp claim <level>${WHITE} | ${CYAN}.bp claimall${RST}"
     echo -e "${WHITE}Admin commands:  ${CYAN}.bpadmin addxp${WHITE} | ${CYAN}.bpadmin setlevel${WHITE} | ${CYAN}.bpadmin reset${WHITE} | ${CYAN}.bpadmin reload${RST}"
+    # Ensure the NPC creature_template entry exists regardless of whether world SQL succeeded
+    echo ""
+    fix_battlepass_npc
 }
 
 configure_ale_paragon() {
@@ -3000,15 +3003,7 @@ configure_ale_bmah() {
     lua_dir=$(ale_lua_scripts_dir)
     local deployed_file="$lua_dir/BMAH.lua"
 
-    # Parallel arrays — index-aligned (Bash 3 compatible; no associative arrays).
-    local -a BNPC_IDS=(   2494              7164    )
-    local -a BNPC_NAMES=( "Privateer Bloads" "Krazek" )
-
-
-    print_step "Black Market AH — NPC Vendor Configuration"
-    echo ""
-    echo -e "${WHITE}The BMAH opens when a player interacts with any gossip-enabled NPC whose${RST}"
-    echo -e "${WHITE}entry ID is listed in ${CYAN}BMAH_VENDOR_NPCs${WHITE} inside BMAH.lua.${RST}"
+    print_step "Black Market AH — Configuration"
     echo ""
 
     # ── Re-deploy base file to pick up latest fixes ──────────
@@ -3034,45 +3029,6 @@ configure_ale_bmah() {
         fi
         return 1
     fi
-    # ── Patch pcall wrapping if not already present ───────────
-    # Prevents script abort when an NPC entry isn't in ObjectMgr yet
-    if ! grep -q "pcall(RegisterCreatureGossipEvent" "$deployed_file"; then
-        python3 - "$deployed_file" <<'PYEOF'
-import sys, re
-path = sys.argv[1]
-with open(path) as f: src = f.read()
-old = re.compile(
-    r'(for _, entry in ipairs\(BMAH_VENDOR_NPCs\) do\n)'
-    r'( +)(RegisterCreatureGossipEvent\(entry, GOSSIP_EVENT_ON_HELLO, +(\S+)\))\n'
-    r'( +)(RegisterCreatureGossipEvent\(entry, GOSSIP_EVENT_ON_SELECT, +(\S+)\))\n'
-    r'(end)'
-)
-def replace(m):
-    ind = m.group(2)
-    h = m.group(4); s = m.group(7)
-    return (
-        f'{m.group(1)}'
-        f'{ind}print("[BMAH] Registering gossip for creature entry: " .. tostring(entry))\n'
-        f'{ind}local ok1, err1 = pcall(RegisterCreatureGossipEvent, entry, GOSSIP_EVENT_ON_HELLO,  {h})\n'
-        f'{ind}local ok2, err2 = pcall(RegisterCreatureGossipEvent, entry, GOSSIP_EVENT_ON_SELECT, {s})\n'
-        f'{ind}if not ok1 or not ok2 then\n'
-        f'{ind}    print("[BMAH] WARNING: Gossip reg failed for entry " .. tostring(entry) .. " — restart worldserver to fix")\n'
-        f'{ind}    print("[BMAH]   " .. tostring(err1 or err2))\n'
-        f'{ind}else\n'
-        f'{ind}    print("[BMAH] Gossip registered OK for entry " .. tostring(entry))\n'
-        f'{ind}end\n'
-        f'{m.group(8)}'
-    )
-patched, n = old.subn(replace, src)
-if n:
-    with open(path, 'w') as f: f.write(patched)
-    print(f"pcall patch applied ({n} block(s))")
-else:
-    print("Pattern not matched — file may already be patched or has custom layout")
-PYEOF
-    else
-        print_info "pcall wrapping already present — skipping patch."
-    fi
 
     # ── Re-apply BMAH_Up.sql to ensure NPC model is correct ──
     local _bmah_sql="$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/sql/BMAH_Up.sql"
@@ -3084,182 +3040,12 @@ PYEOF
             print_warning "BMAH SQL apply failed — check DB container logs."
     fi
 
-    # ── Show current IDs extracted from the file ──────────────
-    local current_ids
-    current_ids=$(awk '
-        /^[[:space:]]*local BMAH_VENDOR_NPCs[[:space:]]*=/ { found=1 }
-        found {
-            tmp = $0
-            gsub(/--[^\n]*/, "", tmp)   # strip line comments
-            while (match(tmp, /[0-9]+/)) {
-                print substr(tmp, RSTART, RLENGTH)
-                tmp = substr(tmp, RSTART + RLENGTH)
-            }
-        }
-        found && /\}/ { exit }
-    ' "$deployed_file" | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//')
-
-    if [ -n "$current_ids" ]; then
-        echo -e "${WHITE}Currently configured NPC IDs:${RST} ${CYAN}${current_ids}${RST}"
-        echo ""
-    fi
-
-    # ── NPC selection menu ────────────────────────────────────
-    echo -e "  ${GOLD}──  Suggested Vendor NPCs (Booty Bay)  ─────────────────────────────────${RST}"
+    # ── Spawn instructions ────────────────────────────────────
     echo ""
-    printf "  ${WHITE}%2s)${RST} %-22s ${CYAN}(%5s)${RST}  %s\n" \
-        1 "Privateer Bloads" 2494 "Booty Bay; shady privateer with underworld connections" \
-        2 "Krazek"           7164 "Booty Bay goblin; deals in rare and illicit goods"
-    echo ""
-    echo -e "  ${GOLD}────────────────────────────────────────────────────────────────────────${RST}"
-    echo ""
-    printf "${WHITE}Select NPCs by number (e.g. 1 2), or \"all\". Leave blank to keep current IDs: ${RST}"
-    read -r _bsel
-
-    # ── Parse numbered selection ──────────────────────────────
-    local -a sel_ids=()
-    local -a sel_names=()
-
-    local _bsel_lower
-    _bsel_lower=$(printf '%s' "$_bsel" | tr '[:upper:]' '[:lower:]')
-    if [ "$_bsel_lower" = "all" ]; then
-        sel_ids=("${BNPC_IDS[@]}")
-        sel_names=("${BNPC_NAMES[@]}")
-    elif [ -n "$_bsel" ]; then
-        local tok
-        for tok in $_bsel; do
-            if [[ "$tok" =~ ^[0-9]+$ ]] && \
-                [ "$tok" -ge 1 ] && [ "$tok" -le "${#BNPC_IDS[@]}" ]; then
-                sel_ids+=("${BNPC_IDS[$((tok - 1))]}")
-                sel_names+=("${BNPC_NAMES[$((tok - 1))]}")
-            else
-                print_warning "  Skipping invalid selection: $tok (valid range: 1-${#BNPC_IDS[@]})"
-            fi
-        done
-    fi
-
-    # ── Optional extra custom NPC ID ─────────────────────────
-    echo ""
-    printf "${WHITE}Add a custom NPC entry ID? (leave blank to skip): ${RST}"
-    read -r _bcustom
-    if [[ "$_bcustom" =~ ^[0-9]+$ ]]; then
-        sel_ids+=("$_bcustom")
-        sel_names+=("Custom NPC")
-    elif [ -n "$_bcustom" ]; then
-        print_warning "  '$_bcustom' is not a valid numeric entry ID — skipping."
-    fi
-
-    # ── Decide add vs replace ─────────────────────────────────
-    local _bmode="add"
-    if [ "${#sel_ids[@]}" -gt 0 ] && [ -n "$current_ids" ]; then
-        echo ""
-        printf "${WHITE}Apply as: [a] Add to existing list  [r] Replace list entirely [a]: ${RST}"
-        read -r _bmode_raw
-        case "$_bmode_raw" in [Rr]) _bmode="replace" ;; esac
-    fi
-
-    # ── Build final deduped ID list ───────────────────────────
-    local -a final_ids=()
-
-    if [ "$_bmode" = "add" ] && [ -n "$current_ids" ]; then
-        local id
-        for id in $current_ids; do
-            [[ "$id" =~ ^[0-9]+$ ]] && final_ids+=("$id")
-        done
-    fi
-
-    local i
-    for (( i=0; i<${#sel_ids[@]}; i++ )); do
-        local sid="${sel_ids[$i]}"
-        if ! _bmah_in_list "$sid" "${final_ids[@]}"; then
-            # Verify the NPC exists in creature_template before adding
-            local npc_check
-            npc_check=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -N \
-                acore_world \
-                -e "SELECT COUNT(*) FROM creature_template WHERE entry=$sid;" 2>/dev/null \
-                | tr -d '[:space:]')
-            if [ "$npc_check" = "0" ] || [ -z "$npc_check" ]; then
-                print_warning "  NPC $sid not found in creature_template — skipping (not in this server's DB)."
-                print_info "    If you want NPC $sid, add it to creature_template first and restart worldserver."
-            else
-                # Ensure the gossip npcflag bit is set so right-click opens gossip
-                docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
-                    -e "UPDATE creature_template SET npcflag = npcflag | 1 WHERE entry = $sid;" \
-                    2>/dev/null
-                final_ids+=("$sid")
-            fi
-        fi
-    done
-
-    # ── Patch the file (or skip if nothing to change) ─────────
-    if [ "${#final_ids[@]}" -eq 0 ] && [ -z "$_bsel" ] && [ -z "$_bcustom" ]; then
-        print_info "No changes to NPC list."
-    elif [ "${#final_ids[@]}" -eq 0 ]; then
-        print_warning "Resulting NPC list is empty — skipping file patch."
-        print_info "Add at least one NPC ID, or edit ${deployed_file} manually."
-    else
-        # Write one NPC entry per line to a temp file; awk reads it with
-        # getline so embedded newlines never hit the -v variable limit.
-        local ids_file tmpfile j label
-        ids_file=$(mktemp "${TMPDIR:-/tmp}/bmah_ids_XXXXXX") || {
-            print_error "Could not create temp file — aborting NPC patch."
-            return 1
-        }
-        tmpfile=$(mktemp "${TMPDIR:-/tmp}/BMAH_XXXXXX.lua") || {
-            rm -f "$ids_file"
-            print_error "Could not create temp file — aborting NPC patch."
-            return 1
-        }
-        for id in "${final_ids[@]}"; do
-            printf "  %s,\n" "$id" >> "$ids_file"
-        done
-
-        # awk replaces the BMAH_VENDOR_NPCs block — handles both inline and
-        # multiline forms.  Anchored to line-start so a commented-out example
-        # line cannot trigger the replacement.  Exits 1 if the pattern was
-        # never matched so we detect a failed patch before overwriting the file.
-        awk -v ids_file="$ids_file" '
-            /^[[:space:]]*local BMAH_VENDOR_NPCs[[:space:]]*=/ {
-                print "local BMAH_VENDOR_NPCs = {"
-                while ((getline line < ids_file) > 0) { print line }
-                close(ids_file)
-                replaced++
-                if (/\}/) { print "}"; next }   # inline closing brace on same line
-                skip = 1
-                next
-            }
-            skip {
-                if (/^[[:space:]]*\}/) { print "}"; skip = 0 }
-                next
-            }
-            { print }
-            END { if (replaced == 0) exit 1 }
-        ' "$deployed_file" > "$tmpfile"
-        local awk_rc=$?
-        rm -f "$ids_file"
-
-        if [ $awk_rc -eq 0 ] && [ -s "$tmpfile" ]; then
-            if mv "$tmpfile" "$deployed_file"; then
-                echo ""
-                print_success "BMAH_VENDOR_NPCs updated with ${#final_ids[@]} NPC(s):"
-                for id in "${final_ids[@]}"; do
-                    label=""
-                    for (( j=0; j<${#BNPC_IDS[@]}; j++ )); do
-                        [ "${BNPC_IDS[$j]}" = "$id" ] && label=" — ${BNPC_NAMES[$j]}" && break
-                    done
-                    print_info "  • ${id}${label}"
-                done
-            else
-                rm -f "$tmpfile"
-                print_error "Could not write updated file — check permissions on: $deployed_file"
-            fi
-        else
-            rm -f "$tmpfile"
-            print_error "Could not locate BMAH_VENDOR_NPCs block in BMAH.lua."
-            print_info "Edit manually: $deployed_file"
-            print_info "Look for: local BMAH_VENDOR_NPCs = { ... } and add your IDs."
-        fi
-    fi
+    print_step "Black Market AH — Spawn the Broker NPC"
+    echo -e "${WHITE}The BMAH broker NPC (entry 2069430) must be placed in the world.${RST}"
+    _offer_npc_in_capitals 2069430 "Black Market Broker" \
+        "Run after restarting the worldserver."
 
     # ── Pricing & timing reference ────────────────────────────
     echo ""
@@ -3856,6 +3642,8 @@ ale_script_install() {
                 print_info "  acore_characters: $clone_dir/sql/battlepass_characters.sql"
                 print_info "Reconfigure anytime from the ALE Scripts menu → c on Battle Pass."
             fi
+            echo ""
+            fix_battlepass_npc
             echo ""
             print_step "Battle Pass — Client Addon"
             echo -e "${WHITE}Battle Pass includes a WoW client addon for the in-game UI.${RST}"

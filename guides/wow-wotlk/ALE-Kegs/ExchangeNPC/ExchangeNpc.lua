@@ -211,10 +211,10 @@ local function eI_ItemOnHello(event, player, creature)
     player:GossipClearMenu()
     if Config.TurnInItemEntry and Config.TurnInItemEntry[1] then
         for n = 1, #Config.TurnInItemEntry do
-            player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(n, 1), Config.ItemNpcEntry, n)
+            player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(n, 1), 0, n)
         end
     end
-    player:GossipMenuAddItem(GOSSIP_ICON_VENDOR, "Let's trade", Config.ItemNpcEntry, 10000)
+    player:GossipMenuAddItem(GOSSIP_ICON_VENDOR, "Let's trade", 0, 10000)
     player:GossipSendMenu(Config.ItemGossipText, creature)
 end
 
@@ -228,10 +228,10 @@ local function eI_ItemOnGossipSelect(event, player, object, sender, intid, code,
             return
         end
         player:GossipClearMenu()
-        player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 1),  Config.ItemNpcEntry, intid + 1000)
-        player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 5),  Config.ItemNpcEntry, intid + 2000)
-        player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 10), Config.ItemNpcEntry, intid + 3000)
-        player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 20), Config.ItemNpcEntry, intid + 4000)
+        player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 1),  0, intid + 1000)
+        player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 5),  0, intid + 2000)
+        player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 10), 0, intid + 3000)
+        player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 20), 0, intid + 4000)
         player:GossipSendMenu(Config.ItemGossipConfirmationText, object)
     elseif intid == 10000 then
         player:SendListInventory(object)
@@ -274,7 +274,7 @@ local function eI_HonorOnHello(event, player, creature)
     player:GossipClearMenu()
     for n = 1, #Config.TurnInHonorAmount do
         local txt = 'Turn in ' .. Config.TurnInHonorAmount[n] .. ' honor to gain ' .. Config.GainGoldAmount[n] .. ' gold.'
-        player:GossipMenuAddItem(OPTION_ICON_CHAT, txt, Config.HonorNpcEntry, n)
+        player:GossipMenuAddItem(OPTION_ICON_CHAT, txt, 0, n)
     end
     player:GossipSendMenu(Config.HonorGossipText, creature)
 end
@@ -286,7 +286,7 @@ local function eI_HonorOnGossipSelect(event, player, object, sender, intid, code
         local ExchangeId = intid
         local txt = 'Yes! Turn in ' .. Config.TurnInHonorAmount[ExchangeId] .. ' honor to gain ' .. Config.GainGoldAmount[ExchangeId] .. ' gold.'
         player:GossipClearMenu()
-        player:GossipMenuAddItem(OPTION_ICON_CHAT, txt, Config.HonorNpcEntry, intid + 1000)
+        player:GossipMenuAddItem(OPTION_ICON_CHAT, txt, 0, intid + 1000)
         player:GossipSendMenu(Config.HonorGossipConfirmationText, object)
     else
         local ExchangeId   = intid - 1000
@@ -340,7 +340,7 @@ end
 local function eI_TokenOnHello(event, player, creature)
     if not player then return end
     player:GossipClearMenu()
-    player:GossipMenuAddItem(OPTION_ICON_CHAT, Config.TokenGossipRefundText, Config.TokenNpcEntry, 1000)
+    player:GossipMenuAddItem(OPTION_ICON_CHAT, Config.TokenGossipRefundText, 0, 1000)
     if not player:HasAchieved(452) and not player:HasAchieved(440) then
         player:SendBroadcastMessage('You need at least 10k honorable kills to buy epic PvP items.')
         player:GossipSendMenu(Config.TokenGossipText, creature)
@@ -348,7 +348,7 @@ local function eI_TokenOnHello(event, player, creature)
     end
     for n = 1, #Config.GainTokenEntry do
         if Config.ShowAllTokens == 1 or eI_HasPreviousToken(player, n) then
-            player:GossipMenuAddItem(OPTION_ICON_CHAT, Config.TokenGossipOptionText[n], Config.TokenNpcEntry, n)
+            player:GossipMenuAddItem(OPTION_ICON_CHAT, Config.TokenGossipOptionText[n], 0, n)
         end
     end
     player:GossipSendMenu(Config.TokenGossipText, creature)
@@ -430,24 +430,39 @@ if Config.ItemNpcOn == 1 then
     spawnAndTrack(npcItemObjectGuid, Config.ItemNpcEntry, Config.ItemNpcInstanceId,
         Config.ItemNpcMapId, Config.ItemNpcX, Config.ItemNpcY, Config.ItemNpcZ, Config.ItemNpcO,
         {65712, 48200})
-    RegisterCreatureGossipEvent(Config.ItemNpcEntry, GOSSIP_EVENT_ON_HELLO,  eI_ItemOnHello)
-    RegisterCreatureGossipEvent(Config.ItemNpcEntry, GOSSIP_EVENT_ON_SELECT, eI_ItemOnGossipSelect)
+    local ok1, err1 = pcall(RegisterCreatureGossipEvent, Config.ItemNpcEntry, GOSSIP_EVENT_ON_HELLO,  eI_ItemOnHello)
+    local ok2, err2 = pcall(RegisterCreatureGossipEvent, Config.ItemNpcEntry, GOSSIP_EVENT_ON_SELECT, eI_ItemOnGossipSelect)
+    if not ok1 or not ok2 then
+        PrintError('ExchangeNpc: ITEM gossip failed for entry ' .. Config.ItemNpcEntry .. ' — restart worldserver: ' .. tostring(err1 or err2))
+    else
+        print('[ExchangeNpc] ITEM gossip registered OK for entry ' .. Config.ItemNpcEntry)
+    end
 end
 
 if Config.HonorNpcOn == 1 then
     spawnAndTrack(npcHonorObjectGuid, Config.HonorNpcEntry, Config.HonorNpcInstanceId,
         Config.HonorNpcMapId, Config.HonorNpcX, Config.HonorNpcY, Config.HonorNpcZ, Config.HonorNpcO,
         {65712})
-    RegisterCreatureGossipEvent(Config.HonorNpcEntry, GOSSIP_EVENT_ON_HELLO,  eI_HonorOnHello)
-    RegisterCreatureGossipEvent(Config.HonorNpcEntry, GOSSIP_EVENT_ON_SELECT, eI_HonorOnGossipSelect)
+    local ok1, err1 = pcall(RegisterCreatureGossipEvent, Config.HonorNpcEntry, GOSSIP_EVENT_ON_HELLO,  eI_HonorOnHello)
+    local ok2, err2 = pcall(RegisterCreatureGossipEvent, Config.HonorNpcEntry, GOSSIP_EVENT_ON_SELECT, eI_HonorOnGossipSelect)
+    if not ok1 or not ok2 then
+        PrintError('ExchangeNpc: HONOR gossip failed for entry ' .. Config.HonorNpcEntry .. ' — restart worldserver: ' .. tostring(err1 or err2))
+    else
+        print('[ExchangeNpc] HONOR gossip registered OK for entry ' .. Config.HonorNpcEntry)
+    end
 end
 
 if Config.TokenNpcOn == 1 then
     spawnAndTrack(npcTokenObjectGuid, Config.TokenNpcEntry, Config.TokenNpcInstanceId,
         Config.TokenNpcMapId, Config.TokenNpcX, Config.TokenNpcY, Config.TokenNpcZ, Config.TokenNpcO,
         nil)
-    RegisterCreatureGossipEvent(Config.TokenNpcEntry, GOSSIP_EVENT_ON_HELLO,  eI_TokenOnHello)
-    RegisterCreatureGossipEvent(Config.TokenNpcEntry, GOSSIP_EVENT_ON_SELECT, eI_TokenOnGossipSelect)
+    local ok1, err1 = pcall(RegisterCreatureGossipEvent, Config.TokenNpcEntry, GOSSIP_EVENT_ON_HELLO,  eI_TokenOnHello)
+    local ok2, err2 = pcall(RegisterCreatureGossipEvent, Config.TokenNpcEntry, GOSSIP_EVENT_ON_SELECT, eI_TokenOnGossipSelect)
+    if not ok1 or not ok2 then
+        PrintError('ExchangeNpc: TOKEN gossip failed for entry ' .. Config.TokenNpcEntry .. ' — restart worldserver: ' .. tostring(err1 or err2))
+    else
+        print('[ExchangeNpc] TOKEN gossip registered OK for entry ' .. Config.TokenNpcEntry)
+    end
 end
 
 if Config.ItemNpcOn == 1 or Config.HonorNpcOn == 1 or Config.TokenNpcOn == 1 then

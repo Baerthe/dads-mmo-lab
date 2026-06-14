@@ -9,14 +9,9 @@
 --   3. RESTART the worldserver (required for new creature_template rows to load)
 --   4. The DB table is created automatically on first load (acore_characters)
 --   5. Reload Lua: .reload ale  (in-game GM command)
---   6. Spawn the NPC: .npc add 2069430  (or add your own entry to BMAH_VENDOR_NPCs)
+--   6. Spawn the NPC: .npc add 2069430
 --   7. Client addon: copy Client Files/AddOns/BlackMarketUI → <WoW>/Interface/AddOns/
 --   NOTE: .reload creature_template will NOT load brand-new entries — full restart required.
---
--- USING A CUSTOM NPC:
---   Add its entry ID to BMAH_VENDOR_NPCs below.
---   The creature_template row must have npcflag with bit 0 set (gossip = 1):
---     UPDATE creature_template SET npcflag = npcflag | 1 WHERE entry = <your_entry>;
 --
 -- GM COMMANDS (whisper yourself or the NPC):
 --   IMPORTANT: run  .gm on  in chat before using these — IsGM() requires
@@ -58,11 +53,7 @@ do
 end
 
 -- ── Config ───────────────────────────────────────────────────────────────────
--- NPC entry IDs that open the BMAH UI when interacted with
-local BMAH_VENDOR_NPCs = {
-    2069430, -- Black Market Broker
-    -- add more entry IDs here as needed
-}
+local BMAH_NPC_ENTRY = 2069430  -- Black Market Broker (use .npc add 2069430 to spawn)
 
 -- Protocol constants (must match the BlackMarketUI client addon)
 local REQ      = "BMAH_REQ"    -- client requests auction list
@@ -340,17 +331,16 @@ local function OnBMAHGossipSelect(event, player, creature, sender, intid, code, 
         player:GossipComplete()
     end
 end
-for _, entry in ipairs(BMAH_VENDOR_NPCs) do
-    print("[BMAH] Registering gossip for creature entry: " .. tostring(entry))
-    local ok1, err1 = pcall(RegisterCreatureGossipEvent, entry, GOSSIP_EVENT_ON_HELLO,  OnBMAHGossipHello)
-    local ok2, err2 = pcall(RegisterCreatureGossipEvent, entry, GOSSIP_EVENT_ON_SELECT, OnBMAHGossipSelect)
+do
+    local ok1, err1 = pcall(RegisterCreatureGossipEvent, BMAH_NPC_ENTRY, GOSSIP_EVENT_ON_HELLO,  OnBMAHGossipHello)
+    local ok2, err2 = pcall(RegisterCreatureGossipEvent, BMAH_NPC_ENTRY, GOSSIP_EVENT_ON_SELECT, OnBMAHGossipSelect)
     if not ok1 or not ok2 then
-        print("[BMAH] WARNING: Gossip registration failed for entry " .. tostring(entry))
+        print("[BMAH] WARNING: Gossip registration failed for entry " .. tostring(BMAH_NPC_ENTRY))
         print("[BMAH]   HELLO:  " .. tostring(err1))
         print("[BMAH]   SELECT: " .. tostring(err2))
         print("[BMAH]   FIX: Run BMAH_Up.sql then 'docker compose restart worldserver'")
     else
-        print("[BMAH] Gossip registered OK for entry " .. tostring(entry))
+        print("[BMAH] Gossip registered OK for entry " .. tostring(BMAH_NPC_ENTRY))
     end
 end
 
@@ -609,8 +599,6 @@ RegisterPlayerEvent(19, function(_, player, msg, _, _, _)
         report("ffffff", "After restart: .npc add 2069430")
     end
     -- Registered NPC entries
-    local entries = {}
-    for _, e in ipairs(BMAH_VENDOR_NPCs) do entries[#entries+1] = tostring(e) end
-    report("69ccf0", "Lua-registered entries: " .. table.concat(entries, ", "))
+    report("69ccf0", "Lua-registered entry: " .. tostring(BMAH_NPC_ENTRY))
     return false
 end)
