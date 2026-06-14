@@ -6350,6 +6350,80 @@ menu_sql_mods() {
 }
 
 # ── Server Maintenance submenu ───────────────────────────────
+# Scan installed module SQL files and mark any untracked ones as applied,
+# fixing ac-db-import "Table X already exists" failures without dropping data.
+fix_dbimport_table_exists() {
+    print_step "Fix: ac-db-import Table Already Exists"
+    echo ""
+    echo -e "${WHITE}This scans every installed module's SQL files. For any file${RST}"
+    echo -e "${WHITE}not tracked in the ${CYAN}updates${RST}${WHITE} table, it computes the file hash${RST}"
+    echo -e "${WHITE}and inserts a tracking row so ac-db-import will skip it.${RST}"
+    echo ""
+    echo -e "${WHITE}Use this when:${RST}"
+    echo -e "  ${CYAN}• ac-db-import fails with 'Table X already exists'${RST}"
+    echo -e "  ${CYAN}• The module SQL does NOT use CREATE TABLE IF NOT EXISTS${RST}"
+    echo ""
+    refresh_container_names
+    sqlmod_init
+    if ! container_running "$DB_CONTAINER"; then
+        print_error "Database container is not running — start the server first."
+        return 1
+    fi
+    local fixed=0 skipped=0
+    local entry key db_full files db_short
+    for entry in "${MODULE_UPDATE_FILES[@]}"; do
+        IFS='|' read -r key db_full files <<< "$entry"
+        [ -z "$files" ] && continue
+        ! module_is_installed "$key" && continue
+        db_short="${db_full#acore_}"
+        local f
+        for f in $files; do
+            # Check if this file already has a tracking row
+            local rows
+            rows=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -N \
+                "$db_full" \
+                -e "SELECT COUNT(*) FROM updates WHERE name='$f';" 2>/dev/null \
+                | tr -d '[:space:]')
+            if [ "$rows" != "0" ] && [ -n "$rows" ]; then
+                echo -e "  ${DIM}○ Already tracked:${RST} $f"
+                skipped=$((skipped + 1))
+                continue
+            fi
+            # Find the file in the modules directory
+            local sql_file
+            sql_file=$(find "$SERVER_DIR/modules/$key" -name "$f" 2>/dev/null | head -1)
+            if [ -z "$sql_file" ]; then
+                echo -e "  ${YELLOW}? File not found:${RST} $f"
+                continue
+            fi
+            local hash; hash=$(compute_sql_hash "$sql_file")
+            if [ -z "$hash" ]; then
+                echo -e "  ${RED}✗ Hash failed:${RST} $f"
+                continue
+            fi
+            docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" \
+                "$db_full" \
+                -e "INSERT INTO updates (name,hash,state,timestamp,speed)
+                    VALUES ('$f','$hash','RELEASED',NOW(),0)
+                    ON DUPLICATE KEY UPDATE hash='$hash',state='RELEASED';" \
+                2>/dev/null
+            echo -e "  ${GREEN}✓ Marked as applied:${RST} $f  ${DIM}(${hash:0:7})${RST}"
+            fixed=$((fixed + 1))
+        done
+    done
+    echo ""
+    if [ "$fixed" -gt 0 ]; then
+        print_success "$fixed file(s) marked as applied."
+        print_info "Restart the server — ac-db-import should now pass."
+    else
+        print_info "No untracked files found (all already marked or no known files)."
+        if [ "$skipped" -gt 0 ]; then
+            print_info "If ac-db-import still fails, try option 1 (Repair install state) to"
+            print_info "clear stale hashes and force a re-apply with mode C (Clear tracking)."
+        fi
+    fi
+}
+
 menu_server_maintenance() {
     _setup_screen
     while true; do
