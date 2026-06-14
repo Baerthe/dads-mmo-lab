@@ -51,7 +51,7 @@ local function BMAH_PrintDebug(tbl)
     -- 2) show the parsed fields
     DEFAULT_CHAT_FRAME:AddMessage(
       string.format(
-        "     → Name=%s, Level=%s, Type=%s, TimeLeft=%s, Seller=%s, Bid=%s, Icon=%s, HotRow=%d, ItemId=%s",
+        "     → Name=%s, Level=%s, Type=%s, TimeLeft=%s, Seller=%s, Bid=%s, Icon=%s, HotRow=%d, WowEntry=%s, RowId=%s",
         tostring(rec.itemName),
         tostring(rec.reqLevel),
         tostring(rec.itemType),
@@ -60,6 +60,7 @@ local function BMAH_PrintDebug(tbl)
         tostring(rec.last_bid),
         tostring(rec.icon or "<none>"),
         rec.maxRowId or 0,
+        tostring(rec.wowEntry),
         tostring(rec.itemId)
       )
     )
@@ -120,8 +121,8 @@ f:SetScript("OnEvent", function(self, event, ...)
     if prefix == ADDON_PREFIX then
       local cmd, payload = msg:match("^([A-Z_]+);?(.*)$")
       if cmd == "DATA" then
-        -- parse a row
-        local itemName, reqLevel, itemType, timeLeft, owner, last_bid, iconName, maxRowIdStr, itemIdStr
+        -- parse a row (10 fields: name;level;type;time;owner;bid;icon;hotIdx;wowEntry;rowId)
+        local itemName, reqLevel, itemType, timeLeft, owner, last_bid, iconName, maxRowIdStr, wowEntryStr, itemIdStr
           = strsplit(";", payload)
         serverMaxRowId = tonumber(maxRowIdStr)
         table.insert(rows, {
@@ -132,6 +133,7 @@ f:SetScript("OnEvent", function(self, event, ...)
           owner    = owner,
           last_bid = tonumber(last_bid),
           icon     = iconName,
+          wowEntry = tonumber(wowEntryStr),
           itemId   = tonumber(itemIdStr),
           _raw     = payload,
         })
@@ -162,6 +164,7 @@ f:SetScript("OnEvent", function(self, event, ...)
   if sender ~= UnitName("player") then return end
 
   if prefix == DATA then
+    -- 10 fields: name;level;type;time;owner;bid;icon;hotIdx;wowEntry;rowId
     local itemName,
       reqLevel,
       itemType,
@@ -170,6 +173,7 @@ f:SetScript("OnEvent", function(self, event, ...)
       last_bid,
       iconName,
       maxRowIdStr,
+      wowEntryStr,
       itemIdStr = strsplit(";", message)
     local maxRowId = tonumber(maxRowIdStr) or 0
     serverMaxRowId = maxRowId
@@ -182,6 +186,7 @@ f:SetScript("OnEvent", function(self, event, ...)
       last_bid = tonumber(last_bid),
       icon     = iconName,
       maxRowId = maxRowId,
+      wowEntry = tonumber(wowEntryStr),
       itemId   = tonumber(itemIdStr),
       _raw     = message,
     })
@@ -654,7 +659,7 @@ init:SetScript("OnEvent", function(self, event)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     local rec = rows[hotItemIndex]
     if not rec then return end
-    GameTooltip:SetHyperlink(("item:%d:0:0:0:0:0:0"):format(rec.itemId))
+    GameTooltip:SetHyperlink(("item:%d:0:0:0:0:0:0"):format(rec.wowEntry or rec.itemId))
     GameTooltip:Show()
   end)
   icon:SetScript("OnLeave", GameTooltip_Hide)
@@ -748,7 +753,7 @@ function BlackMarketUI_Row_OnEnter(self)
   if not rec then return end
 
   GameTooltip:SetOwner(self,     "ANCHOR_RIGHT")
-  GameTooltip:SetHyperlink(("item:%d:0:0:0:0:0:0"):format(rec.itemId))
+  GameTooltip:SetHyperlink(("item:%d:0:0:0:0:0:0"):format(rec.wowEntry or rec.itemId))
   GameTooltip:Show()
 end
 

@@ -215,7 +215,7 @@ local function eI_ItemOnHello(event, player, creature)
         end
     end
     player:GossipMenuAddItem(GOSSIP_ICON_VENDOR, "Let's trade", 0, 10000)
-    player:GossipSendMenu(Config.ItemGossipText, creature)
+    player:GossipSendMenu(1, creature)
 end
 
 local function eI_ItemOnGossipSelect(event, player, object, sender, intid, code, menu_id)
@@ -232,7 +232,7 @@ local function eI_ItemOnGossipSelect(event, player, object, sender, intid, code,
         player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 5),  0, intid + 2000)
         player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 10), 0, intid + 3000)
         player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 20), 0, intid + 4000)
-        player:GossipSendMenu(Config.ItemGossipConfirmationText, object)
+        player:GossipSendMenu(1, object)
     elseif intid == 10000 then
         player:SendListInventory(object)
     else
@@ -276,7 +276,7 @@ local function eI_HonorOnHello(event, player, creature)
         local txt = 'Turn in ' .. Config.TurnInHonorAmount[n] .. ' honor to gain ' .. Config.GainGoldAmount[n] .. ' gold.'
         player:GossipMenuAddItem(OPTION_ICON_CHAT, txt, 0, n)
     end
-    player:GossipSendMenu(Config.HonorGossipText, creature)
+    player:GossipSendMenu(1, creature)
 end
 
 local function eI_HonorOnGossipSelect(event, player, object, sender, intid, code, menu_id)
@@ -287,7 +287,7 @@ local function eI_HonorOnGossipSelect(event, player, object, sender, intid, code
         local txt = 'Yes! Turn in ' .. Config.TurnInHonorAmount[ExchangeId] .. ' honor to gain ' .. Config.GainGoldAmount[ExchangeId] .. ' gold.'
         player:GossipClearMenu()
         player:GossipMenuAddItem(OPTION_ICON_CHAT, txt, 0, intid + 1000)
-        player:GossipSendMenu(Config.HonorGossipConfirmationText, object)
+        player:GossipSendMenu(1, object)
     else
         local ExchangeId   = intid - 1000
         local playerHonor  = player:GetHonorPoints()
@@ -343,7 +343,7 @@ local function eI_TokenOnHello(event, player, creature)
     player:GossipMenuAddItem(OPTION_ICON_CHAT, Config.TokenGossipRefundText, 0, 1000)
     if not player:HasAchieved(452) and not player:HasAchieved(440) then
         player:SendBroadcastMessage('You need at least 10k honorable kills to buy epic PvP items.')
-        player:GossipSendMenu(Config.TokenGossipText, creature)
+        player:GossipSendMenu(1, creature)
         return
     end
     for n = 1, #Config.GainTokenEntry do
@@ -351,7 +351,7 @@ local function eI_TokenOnHello(event, player, creature)
             player:GossipMenuAddItem(OPTION_ICON_CHAT, Config.TokenGossipOptionText[n], 0, n)
         end
     end
-    player:GossipSendMenu(Config.TokenGossipText, creature)
+    player:GossipSendMenu(1, creature)
 end
 
 local function eI_TokenOnGossipSelect(event, player, object, sender, intid, code, menu_id)

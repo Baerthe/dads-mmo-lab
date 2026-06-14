@@ -385,13 +385,14 @@ RegisterPlayerEvent(19, function(_, player, msg, _, _, receiver)
         local itemType = SUBCLASS[classId.."_"..subClassId] or ""
         local tpl      = GetItemTemplate(itemId)
         local iconName = tpl and tpl:GetIcon() or "INV_Misc_QuestionMark"
-        -- payload: name;level;type;time;owner;bid;icon;hotArrayIdx;rowId
+        -- payload: name;level;type;time;owner;bid;icon;hotArrayIdx;wowEntry;rowId
+        -- wowEntry is the actual WoW item ID (for client tooltip hyperlinks)
         -- hotArrayIdx is the 1-based position of the hot item in the results array
         -- rowId is the DB row ID (used by the client to identify the row for bidding)
-        local payload = string.format("%s;%d;%s;%s;%s;%d;%s;%d;%d",
+        local payload = string.format("%s;%d;%s;%s;%s;%d;%s;%d;%d;%d",
             itemName:gsub(";", ""), reqLevel, itemType,
             ClassifyTime(minsLeft), owner:gsub(";", ""),
-            lastBid, iconName:gsub(";", ""), hotArrayIdx, rowId)
+            lastBid, iconName:gsub(";", ""), hotArrayIdx, itemId, rowId)
         player:SendAddonMessage(DATA, payload, 7, target)
         sent = sent + 1
     until not rowsQ:NextRow()
