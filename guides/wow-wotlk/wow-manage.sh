@@ -3570,6 +3570,14 @@ ale_script_install() {
                 print_info "Reconfigure anytime from the ALE Scripts menu → c on Battle Pass."
             fi
             echo ""
+            print_step "Battle Pass — Client Addon"
+            echo -e "${WHITE}Battle Pass includes a WoW client addon for the in-game UI.${RST}"
+            if ask_yes_no "Auto-install BattlePass addon to WoW client now?"; then
+                copy_client_addon "$clone_dir/BattlePass" "BattlePass" "BattlePass addon"
+            else
+                print_info "Manual: cp -r \"$clone_dir/BattlePass\" <WoW>/Interface/AddOns/BattlePass"
+            fi
+            echo ""
             print_info "Battle Pass Ticker (entry 90100) needs to be placed in the world."
             _offer_npc_in_capitals 90100 "Battle Pass Ticker" \
                 "Run after reloading ALE scripts or restarting the worldserver."
@@ -3584,6 +3592,14 @@ ale_script_install() {
                 print_info "  Apply all .sql files (in order) from: $clone_dir/sql/"
                 print_info "  Note: 01_create_database.sql creates the acore_ale database."
                 print_info "Reconfigure anytime from the ALE Scripts menu → c on Paragon."
+            fi
+            echo ""
+            print_step "Paragon Anniversary — Client Files"
+            echo -e "${WHITE}Paragon ships custom Interface files for the in-game progression UI.${RST}"
+            if ask_yes_no "Auto-install Paragon client files to WoW Interface now?"; then
+                copy_client_interface "$clone_dir/clientside/Interface" "Paragon client files"
+            else
+                print_info "Manual: cp -r \"$clone_dir/clientside/Interface/.\" <WoW>/Interface/"
             fi
             ;;
         bmah)
@@ -3603,7 +3619,15 @@ ale_script_install() {
                 print_info "Manual: UPDATE creature_template SET npcflag = npcflag | 1 WHERE entry = 2069430;"
             fi
             echo ""
-            if ask_yes_no "Configure Black Market AH (NPC ID + client addon info) now?"; then
+            print_step "BMAH — Client Addon"
+            echo -e "${WHITE}BMAH includes the BlackMarketUI addon for the in-game auction UI.${RST}"
+            if ask_yes_no "Auto-install BlackMarketUI addon to WoW client now?"; then
+                copy_client_addon "$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/Client Files/AddOns/BlackMarketUI" "BlackMarketUI" "BlackMarketUI addon"
+            else
+                print_info "Manual: cp -r \"$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/Client Files/AddOns/BlackMarketUI\" <WoW>/Interface/AddOns/BlackMarketUI"
+            fi
+            echo ""
+            if ask_yes_no "Configure BMAH (NPC IDs, prices, etc.) now?"; then
                 configure_ale_bmah
             fi
             echo ""
