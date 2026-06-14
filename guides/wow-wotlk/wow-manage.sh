@@ -1491,7 +1491,8 @@ declare -a ALE_SCRIPT_REGISTRY=(
     "accountwide|Accountwide Systems (achievements, currency, mounts, pets)|https://github.com/Aldori15/azerothcore-eluna-accountwide.git"
     "activechat|Azeroth Chatter (lore-grounded ambient world RP chat)|https://github.com/svey-xyz/ActiveChat.git"
     "battlepass|Battle Pass System (XP progression + rewards + client addon)|https://github.com/Shonik/lua-battlepass.git"
-    "bmah|Black Market Auction House (MoP-style BMAH + client addon)|https://github.com/Youpeoples/Black-Market-Auction-House.git"
+    # ! DEBUG: Using Baerthe test repo; move to DadsMmoLab/dads-mmo-lab when merged to main
+    "bmah|Black Market Auction House (MoP-style BMAH + client addon)|https://github.com/Baerthe/dads-mmo-lab.git|Update-Delta"
     # ! DEBUG: Set to baerthe repo for now since original author repo is private. Original repo: dads-mmo-lab
     "exchangenpc|Exchange NPC (configurable item-exchange vendor NPC)|https://github.com/Baerthe/dads-mmo-lab.git|Update-Delta"
     "levelupreward|Level Up Reward (random class-appropriate gear on every level-up)|https://github.com/phreeez/Levelreward.git"
@@ -2265,7 +2266,7 @@ ale_lua_is_deployed() {
         activechat)    [ -d "$lua_dir/AzerothChatter" ] ;;
         battlepass)    [ -d "$lua_dir/battlepass" ] ;;
         paragon)       [ -d "$lua_dir/paragon" ] ;;
-        bmah)          [ -f "$lua_dir/bmah_server.lua" ] ;;
+        bmah)          [ -f "$lua_dir/BMAH.lua" ] ;;
         lootpet)       [ -f "$lua_dir/LootPet.lua" ] ;;
         sod)           [ -f "$lua_dir/SOD.lua" ] ;;
         sitmeanrest)   [ -f "$lua_dir/SitMeansRest.lua" ] ;;
@@ -2834,7 +2835,7 @@ configure_ale_bmah() {
     clone_dir=$(ale_script_clone_dir "bmah")
     local lua_dir
     lua_dir=$(ale_lua_scripts_dir)
-    local deployed_file="$lua_dir/bmah_server.lua"
+    local deployed_file="$lua_dir/BMAH.lua"
 
     # Parallel arrays — index-aligned (Bash 3 compatible; no associative arrays).
     local -a BNPC_IDS=(   2494              7164    )
@@ -2844,12 +2845,12 @@ configure_ale_bmah() {
     print_step "Black Market AH — NPC Vendor Configuration"
     echo ""
     echo -e "${WHITE}The BMAH opens when a player interacts with any gossip-enabled NPC whose${RST}"
-    echo -e "${WHITE}entry ID is listed in ${CYAN}BMAH_VENDOR_NPCs${WHITE} inside bmah_server.lua.${RST}"
+    echo -e "${WHITE}entry ID is listed in ${CYAN}BMAH_VENDOR_NPCs${WHITE} inside BMAH.lua.${RST}"
     echo ""
 
     # ── Missing file guard ────────────────────────────────────
     if [ ! -f "$deployed_file" ]; then
-        print_warning "bmah_server.lua not found at:"
+        print_warning "BMAH.lua not found at:"
         print_info "  $deployed_file"
         print_info "Deploy the script first (install from the ALE Scripts menu), then reconfigure."
         echo ""
@@ -2857,9 +2858,9 @@ configure_ale_bmah() {
         echo -e "${WHITE}BMAH includes a WoW addon that recreates the Mists of Pandaria BMAH UI.${RST}"
         echo ""
         if ask_yes_no "Auto-install BlackMarketUI addon to WoW client now?"; then
-            copy_client_addon "$clone_dir/Client Files/AddOns/BlackMarketUI" "BlackMarketUI" "BlackMarketUI addon"
+            copy_client_addon "$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/Client Files/AddOns/BlackMarketUI" "BlackMarketUI" "BlackMarketUI addon"
         else
-            print_info "Manual: cp -r \"$clone_dir/Client Files/AddOns/BlackMarketUI\" <WoW>/Interface/AddOns/BlackMarketUI"
+            print_info "Manual: cp -r \"$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/Client Files/AddOns/BlackMarketUI\" <WoW>/Interface/AddOns/BlackMarketUI"
         fi
         return 1
     fi
@@ -2970,7 +2971,7 @@ configure_ale_bmah() {
             print_error "Could not create temp file — aborting NPC patch."
             return 1
         }
-        tmpfile=$(mktemp "${TMPDIR:-/tmp}/bmah_server_XXXXXX.lua") || {
+        tmpfile=$(mktemp "${TMPDIR:-/tmp}/BMAH_XXXXXX.lua") || {
             rm -f "$ids_file"
             print_error "Could not create temp file — aborting NPC patch."
             return 1
@@ -3020,7 +3021,7 @@ configure_ale_bmah() {
             fi
         else
             rm -f "$tmpfile"
-            print_error "Could not locate BMAH_VENDOR_NPCs block in bmah_server.lua."
+            print_error "Could not locate BMAH_VENDOR_NPCs block in BMAH.lua."
             print_info "Edit manually: $deployed_file"
             print_info "Look for: local BMAH_VENDOR_NPCs = { ... } and add your IDs."
         fi
@@ -3028,7 +3029,7 @@ configure_ale_bmah() {
 
     # ── Pricing & timing reference ────────────────────────────
     echo ""
-    echo -e "${WHITE}Other configurable values (edit directly in bmah_server.lua):${RST}"
+    echo -e "${WHITE}Other configurable values (edit directly in BMAH.lua):${RST}"
     echo ""
     printf "  ${CYAN}%-32s${RST} ${WHITE}%s${RST}\n" \
         "common/rare/ultraRare_*_price"  "Starting bids per item category and tier" \
@@ -3045,9 +3046,9 @@ configure_ale_bmah() {
     echo -e "${WHITE}BMAH includes a WoW addon that recreates the Mists of Pandaria BMAH UI.${RST}"
     echo ""
     if ask_yes_no "Auto-install BlackMarketUI addon to WoW client now?"; then
-        copy_client_addon "$clone_dir/Client Files/AddOns/BlackMarketUI" "BlackMarketUI" "BlackMarketUI addon"
+        copy_client_addon "$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/Client Files/AddOns/BlackMarketUI" "BlackMarketUI" "BlackMarketUI addon"
     else
-        print_info "Manual: cp -r \"$clone_dir/Client Files/AddOns/BlackMarketUI\" <WoW>/Interface/AddOns/BlackMarketUI"
+        print_info "Manual: cp -r \"$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/Client Files/AddOns/BlackMarketUI\" <WoW>/Interface/AddOns/BlackMarketUI"
     fi
     echo -e "${WHITE}After installing, run ${CYAN}/reload${WHITE} or restart the WoW client.${RST}"
 }
@@ -3355,15 +3356,15 @@ ale_deploy_lua_files() {
             fi
             ;;
         bmah)
-            # Upstream layout: Server Files/lua_scripts/bmah_server.lua
-            local src="$clone_dir/Server Files/lua_scripts/bmah_server.lua"
+            # ALE-Kegs fork: BMAH.lua lives at the root of BlackMarketAuctionHouse/
+            local src="$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/BMAH.lua"
             if [ -f "$src" ]; then
                 cp "$src" "$lua_dir/" && \
-                    print_success "Deployed bmah_server.lua → lua_scripts/" || \
+                    print_success "Deployed BMAH.lua → lua_scripts/" || \
                     print_warning "Copy failed — check '$src'"
             else
                 print_warning "Expected file not found: $src"
-                print_info "Manually copy bmah_server.lua to: $lua_dir/"
+                print_info "Manually copy BMAH.lua to: $lua_dir/"
             fi
             ;;
         lootpet)
@@ -3430,6 +3431,7 @@ ale_script_install() {
     case "$key" in
         sod)         _dml_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/SeasonOfDiscovery/SOD.lua" ;;
         exchangenpc) _dml_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/ExchangeNPC/ExchangeNpc.lua" ;;
+        bmah)        _dml_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/BMAH.lua" ;;
     esac
 
     if [ -n "$_dml_src" ]; then
@@ -3447,6 +3449,7 @@ ale_script_install() {
             case "$key" in
                 sod)         _sparse_path="guides/wow-wotlk/ALE-Kegs/SeasonOfDiscovery" ;;
                 exchangenpc) _sparse_path="guides/wow-wotlk/ALE-Kegs/ExchangeNPC" ;;
+                bmah)        _sparse_path="guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse" ;;
             esac
             mkdir -p "$clone_dir"
             if ! git -C "$clone_dir" init -q || \
@@ -3690,7 +3693,7 @@ ale_script_remove() {
         activechat)  deployed_hint="$lua_dir/AzerothChatter/" ;;
         battlepass)  deployed_hint="$lua_dir/battlepass/  and  $lua_dir/lib/CSMH/" ;;
         paragon)     deployed_hint="$lua_dir/paragon/" ;;
-        bmah)        deployed_hint="$lua_dir/bmah_server.lua" ;;
+        bmah)        deployed_hint="$lua_dir/BMAH.lua" ;;
         lootpet)     deployed_hint="$lua_dir/LootPet.lua" ;;
         sitmeanrest)  deployed_hint="$lua_dir/SitMeansRest.lua" ;;
         exchangenpc) deployed_hint="$lua_dir/ExchangeNpc.lua" ;;
@@ -3707,7 +3710,7 @@ ale_script_remove() {
             activechat)  rm -rf "$lua_dir/AzerothChatter" ;;
             battlepass)  rm -rf "$lua_dir/battlepass" "$lua_dir/lib/CSMH" ;;
             paragon)     rm -rf "$lua_dir/paragon" ;;
-            bmah)        rm -f  "$lua_dir/bmah_server.lua" ;;
+            bmah)        rm -f  "$lua_dir/BMAH.lua" ;;
             lootpet)     rm -f  "$lua_dir/LootPet.lua" ;;
             sitmeanrest)   rm -f "$lua_dir/SitMeansRest.lua" ;;
             sod)           rm -f "$lua_dir/SOD.lua" ;;
