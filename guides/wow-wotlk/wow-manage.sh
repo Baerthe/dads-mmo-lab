@@ -26,7 +26,7 @@
 #  https://github.com/DadsMmoLab/dads-mmo-lab
 # ============================================================
 
-MANAGER_VERSION="2.1.5 - ALE Drinker Edition"
+MANAGER_VERSION="2.2.1 - ALE House Edition"
 
 set -o pipefail
 
@@ -937,6 +937,7 @@ DB_CONTAINER=""
 AUTH_CONTAINER=""
 DB_ROOT_PASSWORD="password"   # acore-docker default
 INGAME_COMMANDS_FILE=""       # set to $SERVER_DIR/ingame-commands.txt after detect_install
+WOW_CLIENT_DIR=""             # set by detect_wow_client; saved to $SERVER_DIR/.wow_client_dir
 
 # Session counter for NPC spawn coordinate staggering (deterministic per known entry)
 _NPC_SPAWN_IDX=0
@@ -1044,6 +1045,88 @@ detect_install() {
     # Find running containers (will be empty if server is stopped — that's OK)
     refresh_container_names
     INGAME_COMMANDS_FILE="$SERVER_DIR/ingame-commands.txt"
+}
+
+# ─────────────────────────────────────────────────────────────
+# WOW CLIENT DETECTION
+# ─────────────────────────────────────────────────────────────
+# Probe common SteamOS/Ubuntu paths for a WoW WotLK client.
+# Saves the found path to $SERVER_DIR/.wow_client_dir for reuse.
+# Sets WOW_CLIENT_DIR; returns 0 on success, 1 if not found/skipped.
+detect_wow_client() {
+    [ -n "$WOW_CLIENT_DIR" ] && return 0
+    local _cache="$SERVER_DIR/.wow_client_dir"
+    if [ -f "$_cache" ]; then
+        local _saved; _saved=$(cat "$_cache")
+        if [ -d "$_saved" ]; then
+            WOW_CLIENT_DIR="$_saved"
+            return 0
+        fi
+    fi
+    print_step "Detecting WoW client install"
+    local -a _paths=(
+        "$HOME/.steam/steam/steamapps/common/World of Warcraft"
+        "$HOME/.steam/steam/steamapps/common/wow wotlk"
+        "$HOME/.steam/steam/steamapps/common/wotlk"
+        "$HOME/.steam/steam/steamapps/common/ChromieCraft_3.3.5a"
+        "$HOME/.steam/steam/steamapps/common/wow 3.3.5a"
+        "$HOME/.steam/steam/steamapps/common/wow-client-3.3.5a"
+        "$HOME/Steam/steamapps/common/World of Warcraft"
+        "$HOME/Steam/steamapps/common/wow wotlk"
+        "$HOME/Steam/steamapps/common/wotlk"
+        "$HOME/Steam/steamapps/common/ChromieCraft_3.3.5a"
+        "$HOME/Steam/steamapps/common/wow 3.3.5a"
+        "$HOME/Steam/steamapps/common/wow-client-3.3.5a"
+        "$HOME/.local/share/Steam/steamapps/common/World of Warcraft"
+        "$HOME/.local/share/Steam/steamapps/common/wow wotlk"
+        "$HOME/.local/share/Steam/steamapps/common/wotlk"
+        "$HOME/.local/share/Steam/steamapps/common/ChromieCraft_3.3.5a"
+        "$HOME/.local/share/Steam/steamapps/common/wow 3.3.5a"
+        "$HOME/.local/share/Steam/steamapps/common/wow-client-3.3.5a"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/World of Warcraft"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wow wotlk"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wotlk"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/ChromieCraft_3.3.5a"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wow 3.3.5a"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wow-client-3.3.5a"
+        "$HOME/wow-client"
+        "$HOME/wow-wotlk-client"
+        "$HOME/wow-client-3.3.5a"
+        "$HOME/wow wotlk"
+        "$HOME/wotlk"
+        "$HOME/ChromieCraft_3.3.5a"
+        "$HOME/wow 3.3.5a"
+        "$HOME/Games/World of Warcraft"
+        "$HOME/Games/wow wotlk"
+        "$HOME/Games/wotlk"
+        "$HOME/Games/ChromieCraft_3.3.5a"
+        "$HOME/Games/wow 3.3.5a"
+        "$HOME/Games/wow-client-3.3.5a"
+    )
+    local p
+    for p in "${_paths[@]}"; do
+        if [ -d "$p" ] && \
+            ( [ -f "$p/Wow.exe" ] || [ -f "$p/wow.exe" ] || \
+              [ -f "$p/WowT.exe" ] || [ -d "$p/Interface" ] ); then
+            WOW_CLIENT_DIR="$p"
+            print_success "WoW client found: $WOW_CLIENT_DIR"
+            echo "$WOW_CLIENT_DIR" > "$_cache"
+            return 0
+        fi
+    done
+    print_warning "WoW client not found automatically. Paths checked:"
+    for p in "${_paths[@]}"; do print_info "  $p"; done
+    echo ""
+    printf "${WHITE}Enter full path to WoW client folder (leave blank to skip): ${RST}"
+    read -r _manual
+    if [ -n "$_manual" ] && [ -d "$_manual" ]; then
+        WOW_CLIENT_DIR="$_manual"
+        echo "$WOW_CLIENT_DIR" > "$_cache"
+        print_success "WoW client set to: $WOW_CLIENT_DIR"
+        return 0
+    fi
+    print_warning "WoW client path not set — addon and client data auto-install skipped."
+    return 1
 }
 
 # Classify an install by looking at directory name AND, if needed,
@@ -2218,6 +2301,59 @@ ale_run_sql_file() {
     fi
 }
 
+# Copy a WoW addon folder into the client's Interface/AddOns/.
+# Usage: copy_client_addon <src_dir> <addon_name> [description]
+# Calls detect_wow_client if WOW_CLIENT_DIR is not yet set.
+copy_client_addon() {
+    local src_dir="$1" addon_name="$2" desc="${3:-$2}"
+    if ! detect_wow_client; then
+        print_info "Manual install: copy ${CYAN}$src_dir${RST} → <WoW>/Interface/AddOns/$addon_name/"
+        return 1
+    fi
+    local dest="$WOW_CLIENT_DIR/Interface/AddOns/$addon_name"
+    if [ ! -d "$src_dir" ]; then
+        print_warning "Addon source not found: $src_dir"
+        print_info "Manual: cp -r \"$src_dir\" \"$dest\""
+        return 1
+    fi
+    mkdir -p "$dest"
+    if cp -r "$src_dir/." "$dest/"; then
+        print_success "$desc installed → $dest"
+        return 0
+    else
+        print_warning "Copy failed — install manually:"
+        print_info "  cp -r \"$src_dir/\" \"$dest/\""
+        return 1
+    fi
+}
+
+# Merge a full Interface/ tree into the client's Interface/ directory.
+# Used for mods (e.g. Paragon) that ship custom Interface subfolders
+# rather than a self-contained AddOns entry.
+# Usage: copy_client_interface <src_interface_dir> [description]
+copy_client_interface() {
+    local src_dir="$1" desc="${2:-Interface files}"
+    if ! detect_wow_client; then
+        print_info "Manual install: merge ${CYAN}$src_dir${RST} → <WoW>/Interface/"
+        return 1
+    fi
+    local dest="$WOW_CLIENT_DIR/Interface"
+    if [ ! -d "$src_dir" ]; then
+        print_warning "Interface source not found: $src_dir"
+        print_info "Manual: cp -r \"$src_dir/.\" \"$dest/\""
+        return 1
+    fi
+    mkdir -p "$dest"
+    if cp -r "$src_dir/." "$dest/"; then
+        print_success "$desc merged → $dest"
+        return 0
+    else
+        print_warning "Copy failed — install manually:"
+        print_info "  cp -r \"$src_dir/.\" \"$dest/\""
+        return 1
+    fi
+}
+
 # ── Per-script post-install configuration ────────────────────
 
 configure_ale_battlepass() {
@@ -2301,14 +2437,15 @@ configure_ale_battlepass() {
 
     # Client addon
     echo ""
-    print_step "Battle Pass — Client Addon Required"
+    print_step "Battle Pass — Client Addon"
     echo -e "${WHITE}The Battle Pass system includes a WoW client addon for the in-game UI.${RST}"
     echo ""
-    echo -e "${WHITE}${BOLD}Copy this folder to your WoW client's AddOns directory:${RST}"
-    echo -e "  ${CYAN}Source:${RST}      $clone_dir/BattlePass/"
-    echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/BattlePass/"
-    echo ""
-    echo -e "${WHITE}Use ${CYAN}/bp${WHITE} or ${CYAN}/battlepass${WHITE} in the WoW chat to open the Battle Pass frame.${RST}"
+    if ask_yes_no "Auto-install BattlePass addon to WoW client now?"; then
+        copy_client_addon "$clone_dir/BattlePass" "BattlePass" "BattlePass addon"
+    else
+        print_info "Manual: cp -r \"$clone_dir/BattlePass\" <WoW>/Interface/AddOns/BattlePass"
+    fi
+    echo -e "${WHITE}Use ${CYAN}/bp${WHITE} or ${CYAN}/battlepass${WHITE} in WoW chat to open the Battle Pass frame.${RST}"
     echo -e "${WHITE}Server commands: ${CYAN}.bp${WHITE} | ${CYAN}.bp rewards${WHITE} | ${CYAN}.bp claim <level>${WHITE} | ${CYAN}.bp claimall${RST}"
     echo -e "${WHITE}Admin commands:  ${CYAN}.bpadmin addxp${WHITE} | ${CYAN}.bpadmin setlevel${WHITE} | ${CYAN}.bpadmin reset${WHITE} | ${CYAN}.bpadmin reload${RST}"
 }
@@ -2410,16 +2547,18 @@ configure_ale_paragon() {
     echo ""
     echo -e "${DIM}Full install guide: $clone_dir/doc/INSTALL.md${RST}"
 
-    # Client addon
+    # Client files — Paragon ships a full Interface/ subtree, not just an AddOn
     echo ""
-    print_step "Paragon Anniversary — Client Addon Required"
-    echo -e "${WHITE}Paragon includes a WoW client addon for the in-game progression UI.${RST}"
+    print_step "Paragon Anniversary — Client Files"
+    echo -e "${WHITE}Paragon ships custom Interface files for the in-game progression UI.${RST}"
+    echo -e "${DIM}These are merged into your WoW client's Interface/ directory.${RST}"
     echo ""
-    echo -e "${WHITE}${BOLD}Find the addon folder in the cloned repo and copy it to AddOns:${RST}"
-    echo -e "  ${CYAN}Look in:${RST}     $clone_dir/"
-    echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/ParagonAnniversary/"
-    echo ""
-    echo -e "${DIM}The addon communicates with the server via the ParagonAnniversary protocol.${RST}"
+    if ask_yes_no "Auto-install Paragon client files to WoW Interface now?"; then
+        copy_client_interface "$clone_dir/clientside/Interface" "Paragon client files"
+    else
+        print_info "Manual: cp -r \"$clone_dir/clientside/Interface/.\" <WoW>/Interface/"
+    fi
+    echo -e "${DIM}Full install guide: $clone_dir/doc/INSTALL.md${RST}"
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -2594,14 +2733,14 @@ configure_ale_bmah() {
         print_info "  $deployed_file"
         print_info "Deploy the script first (install from the ALE Scripts menu), then reconfigure."
         echo ""
-        print_step "Black Market AH — Client Addon Required"
+        print_step "Black Market AH — Client Addon"
         echo -e "${WHITE}BMAH includes a WoW addon that recreates the Mists of Pandaria BMAH UI.${RST}"
         echo ""
-        echo -e "${WHITE}${BOLD}Copy this folder to your WoW client's AddOns directory:${RST}"
-        echo -e "  ${CYAN}Source:${RST}      $clone_dir/BlackMarketUI/"
-        echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/BlackMarketUI/"
-        echo ""
-        echo -e "${WHITE}After copying, run ${CYAN}/reload${WHITE} or restart the WoW client.${RST}"
+        if ask_yes_no "Auto-install BlackMarketUI addon to WoW client now?"; then
+            copy_client_addon "$clone_dir/Client Files/AddOns/BlackMarketUI" "BlackMarketUI" "BlackMarketUI addon"
+        else
+            print_info "Manual: cp -r \"$clone_dir/Client Files/AddOns/BlackMarketUI\" <WoW>/Interface/AddOns/BlackMarketUI"
+        fi
         return 1
     fi
 
@@ -2782,14 +2921,15 @@ configure_ale_bmah() {
 
     # ── Client addon ─────────────────────────────────────────
     echo ""
-    print_step "Black Market AH — Client Addon Required"
+    print_step "Black Market AH — Client Addon"
     echo -e "${WHITE}BMAH includes a WoW addon that recreates the Mists of Pandaria BMAH UI.${RST}"
     echo ""
-    echo -e "${WHITE}${BOLD}Copy this folder to your WoW client's AddOns directory:${RST}"
-    echo -e "  ${CYAN}Source:${RST}      $clone_dir/BlackMarketUI/"
-    echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/BlackMarketUI/"
-    echo ""
-    echo -e "${WHITE}After copying, run ${CYAN}/reload${WHITE} or restart the WoW client.${RST}"
+    if ask_yes_no "Auto-install BlackMarketUI addon to WoW client now?"; then
+        copy_client_addon "$clone_dir/Client Files/AddOns/BlackMarketUI" "BlackMarketUI" "BlackMarketUI addon"
+    else
+        print_info "Manual: cp -r \"$clone_dir/Client Files/AddOns/BlackMarketUI\" <WoW>/Interface/AddOns/BlackMarketUI"
+    fi
+    echo -e "${WHITE}After installing, run ${CYAN}/reload${WHITE} or restart the WoW client.${RST}"
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -3326,6 +3466,12 @@ ale_script_install() {
             print_info "Black Market AH Auctioneer (entry 2069430) needs to be placed in the world."
             _offer_npc_in_capitals 2069430 "Black Market AH Auctioneer" \
                 "Run after reloading ALE scripts or restarting the worldserver."
+            ;;
+        sod)
+            echo ""
+            print_step "Season of Discovery — Server-Side Only"
+            echo -e "${WHITE}SoD is a server-side Lua mod — no WoW client files are required.${RST}"
+            echo -e "${DIM}The server automatically applies buffs and class changes on login.${RST}"
             ;;
         sitmeanrest)
             echo ""
@@ -5732,8 +5878,8 @@ _maintenance_backup_all() {
         local bfile="$SQLMOD_BACKUP_DIR/${ts}_${db}.sql.gz"
         print_info "Backing up ${db} → $(basename "$bfile") ..."
         if ( set -o pipefail
-             docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" "$db" \
-                 2>/dev/null | gzip > "$bfile"
+            docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" "$db" \
+                2>/dev/null | gzip > "$bfile"
         ); then
             print_success "  ✓ $db"
             _prune_backup_files "$SQLMOD_BACKUP_DIR" "*_${db}.sql.gz" 2
@@ -5821,8 +5967,8 @@ _maintenance_import() {
     local ts; ts=$(date +%Y%m%d_%H%M%S)
     local safefile="$SQLMOD_BACKUP_DIR/${ts}_pre_restore_${target_db}.sql.gz"
     if ( set -o pipefail
-         docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" "$target_db" \
-             2>/dev/null | gzip > "$safefile"
+        docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" "$target_db" \
+            2>/dev/null | gzip > "$safefile"
     ); then
         print_success "Safety backup: $(basename "$safefile")"
     else
@@ -5876,6 +6022,17 @@ main_menu() {
 
         printf "  ${WHITE}Server:${RST} ${CYAN}%s${RST}  ${GOLD}✦${RST}  ${WHITE}State:${RST} %b  ${GOLD}✦${RST}  ${WHITE}Build:${RST} %b\n" \
             "$(basename "$SERVER_DIR")" "$state_str" "$build_str"
+        local _client_cache="$SERVER_DIR/.wow_client_dir"
+        local _client_str
+        if [ -n "$WOW_CLIENT_DIR" ]; then
+            _client_str="${GREEN}● Set${RST}  ${DIM}$(basename "$WOW_CLIENT_DIR")${RST}"
+        elif [ -f "$_client_cache" ] && [ -d "$(cat "$_client_cache")" ]; then
+            WOW_CLIENT_DIR=$(cat "$_client_cache")
+            _client_str="${GREEN}● Set${RST}  ${DIM}$(basename "$WOW_CLIENT_DIR")${RST}"
+        else
+            _client_str="${DIM}○ Not set${RST}"
+        fi
+        printf "  ${WHITE}WoW Client:${RST} %b  ${GOLD}✦${RST}  ${WHITE}Version:${RST} ${DIM}WotLK 3.3.5a${RST}\n" "$_client_str"
         printf "\n  ${GOLD}${BOLD}Server Modifications${RST}\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${WHITE}1)${RST} Manage AzerothCore Modules\n"
@@ -5968,7 +6125,6 @@ sync_ingame_commands_for_installed() {
 # ─────────────────────────────────────────────────────────────
 # ENTRYPOINT
 # ─────────────────────────────────────────────────────────────
-
 
 start_logo_animation
 detect_install
