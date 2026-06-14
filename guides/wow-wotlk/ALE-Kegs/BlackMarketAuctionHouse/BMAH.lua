@@ -324,7 +324,9 @@ end
 -- ── Gossip: open BMAH UI ──────────────────────────────────────────────────────
 -- ALE: RegisterCreatureGossipEvent with GOSSIP_EVENT_ON_HELLO=1, ON_SELECT=2.
 -- GossipSendMenu(textId, creature) — use textId=1 (default greeting, always exists).
--- SendAddonMessage channel 255 = CHAT_MSG_ADDON (0xFF) — correct for WotLK 3.3.5.
+-- SendAddonMessage channel 7 = CHAT_MSG_WHISPER+LANG_ADDON (correct WotLK wire format).
+-- The WoW 3.3.5 client fires CHAT_MSG_ADDON when it receives type=WHISPER with LANG_ADDON.
+-- Channel 255 (ChatMsg(0xFF)) is NOT CHAT_MSG_ADDON (0xFFFFFFFF) — it crashes the client.
 local GOSSIP_EVENT_ON_HELLO  = 1
 local GOSSIP_EVENT_ON_SELECT = 2
 local function OnBMAHGossipHello(event, player, creature)
@@ -334,7 +336,7 @@ local function OnBMAHGossipHello(event, player, creature)
 end
 local function OnBMAHGossipSelect(event, player, creature, sender, intid, code, menu_id)
     if intid == 1 then
-        player:SendAddonMessage("BMAHUI", "OPEN", 255, player)
+        player:SendAddonMessage("BMAHUI", "OPEN", 7, player)
         player:GossipComplete()
     end
 end
@@ -359,9 +361,17 @@ RegisterPlayerEvent(19, function(_, player, msg, _, _, receiver)
     -- find the auction with the most bids (used as "hot item" indicator)
     local maxQ   = CharDBQuery("SELECT id FROM blackmarketauctionhouse ORDER BY total_bids DESC LIMIT 1")
     local hotId  = maxQ and maxQ:GetUInt32(0) or 0
+    -- pre-compute the 1-based array index of the hot item in ORDER BY id ASC sequence
+    -- (hotId is a DB row ID; the client uses the value as an array index into the rows table)
+    local hotArrayIdx = 0
+    if hotId > 0 then
+        local posQ = CharDBQuery(string.format(
+            "SELECT COUNT(*) FROM blackmarketauctionhouse WHERE id <= %d", hotId))
+        hotArrayIdx = posQ and posQ:GetUInt32(0) or 0
+    end
     local rowsQ  = CharDBQuery("SELECT id, item_id, time, item_owner, last_bid FROM blackmarketauctionhouse ORDER BY id ASC")
     if not rowsQ then
-        player:SendAddonMessage(DONE, "0", 255, target)
+        player:SendAddonMessage(DONE, "0", 7, target)
         return
     end
     local sent = 0
@@ -385,15 +395,17 @@ RegisterPlayerEvent(19, function(_, player, msg, _, _, receiver)
         local itemType = SUBCLASS[classId.."_"..subClassId] or ""
         local tpl      = GetItemTemplate(itemId)
         local iconName = tpl and tpl:GetIcon() or "INV_Misc_QuestionMark"
-        -- payload: name;level;type;time;owner;bid;icon;hotRowId;rowId
+        -- payload: name;level;type;time;owner;bid;icon;hotArrayIdx;rowId
+        -- hotArrayIdx is the 1-based position of the hot item in the results array
+        -- rowId is the DB row ID (used by the client to identify the row for bidding)
         local payload = string.format("%s;%d;%s;%s;%s;%d;%s;%d;%d",
             itemName:gsub(";", ""), reqLevel, itemType,
             ClassifyTime(minsLeft), owner:gsub(";", ""),
-            lastBid, iconName, hotId, rowId)
-        player:SendAddonMessage(DATA, payload, 255, target)
+            lastBid, iconName:gsub(";", ""), hotArrayIdx, rowId)
+        player:SendAddonMessage(DATA, payload, 7, target)
         sent = sent + 1
     until not rowsQ:NextRow()
-    player:SendAddonMessage(DONE, tostring(sent), 255, target)
+    player:SendAddonMessage(DONE, tostring(sent), 7, target)
 end)
 
 -- ── Flush command (GM whispers bmah_flush) ────────────────────────────────────

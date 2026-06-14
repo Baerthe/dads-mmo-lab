@@ -6450,6 +6450,54 @@ fix_dbimport_table_exists() {
     fi
 }
 
+fix_battlepass_npc() {
+    print_step "Fix: BattlePass NPC (entry 90100) missing from database"
+    echo ""
+    echo -e "${WHITE}This creates creature_template entry 90100 (Battle Pass Vendor) in${RST}"
+    echo -e "${WHITE}acore_world. Required before .npc add 90100 will work in-game.${RST}"
+    echo ""
+    refresh_container_names
+    sqlmod_init
+    if ! container_running "$DB_CONTAINER"; then
+        print_error "Database container is not running — start the server first."
+        return 1
+    fi
+    if docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world 2>/dev/null <<'_BPNPC_SQL'
+DELETE FROM `creature_template` WHERE `entry` = 90100;
+INSERT INTO `creature_template`
+  (`entry`,`name`,`subname`,`gossip_menu_id`,`minlevel`,`maxlevel`,`exp`,`faction`,`npcflag`,
+   `speed_walk`,`speed_run`,`rank`,`dmgschool`,`DamageModifier`,
+   `BaseAttackTime`,`RangeAttackTime`,`BaseVariance`,`RangeVariance`,
+   `unit_class`,`unit_flags`,`unit_flags2`,`dynamicflags`,
+   `type`,`AIName`,`MovementType`,`HoverHeight`,
+   `HealthModifier`,`ManaModifier`,`ArmorModifier`,`RegenHealth`,`flags_extra`,`VerifiedBuild`)
+VALUES
+  (90100,'Battle Pass Vendor','Seasonal Rewards',0,80,80,0,35,1,
+   1.0,1.14286,0,0,1.0,2000,2000,1.0,1.0,1,33536,2048,0,7,'',0,1.0,1.0,1.0,1.0,1,2,0);
+SET @hasScale=(SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='creature_template' AND COLUMN_NAME='scale');
+SET @sql=IF(@hasScale>0,'UPDATE creature_template SET scale=1.0 WHERE entry=90100','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+SET @hasModelTable=(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='creature_template_model');
+SET @sql=IF(@hasModelTable>0,'DELETE FROM creature_template_model WHERE CreatureID=90100','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+SET @sql=IF(@hasModelTable>0,'INSERT INTO creature_template_model (CreatureID,Idx,CreatureDisplayID,DisplayScale,Probability,VerifiedBuild) VALUES (90100,0,25478,1.0,1.0,0)','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+SET @hasModelid1=(SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='creature_template' AND COLUMN_NAME='modelid1');
+SET @sql=IF(@hasModelid1>0,'UPDATE creature_template SET modelid1=25478 WHERE entry=90100','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+_BPNPC_SQL
+    then
+        print_success "NPC entry 90100 (Battle Pass Vendor) created in acore_world."
+        echo ""
+        print_info "Next steps:"
+        print_info "  1. Restart the worldserver (ObjectMgr must reload creature_template):"
+        print_info "     ${CYAN}docker compose restart worldserver${RST}"
+        print_info "  2. In-game: ${CYAN}.npc add 90100${RST}  to spawn the vendor"
+    else
+        print_error "SQL failed — is the database container running?"
+    fi
+}
+
 menu_server_maintenance() {
     _setup_screen
     while true; do
@@ -6464,6 +6512,7 @@ menu_server_maintenance() {
         printf "  ${WHITE}2)${RST} Backup databases\n"
         printf "  ${WHITE}3)${RST} Restore / import a backup\n"
         printf "  ${WHITE}4)${RST} Fix: ac-db-import 'Table already exists' errors\n"
+        printf "  ${WHITE}5)${RST} Fix: BattlePass NPC missing (entry 90100)\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${DIM}  [ENTER] Back${RST}\n"
 
@@ -6480,8 +6529,9 @@ menu_server_maintenance() {
             2) _maintenance_backup_all; press_enter ;;
             3) _maintenance_import ;;
             4) fix_dbimport_table_exists; press_enter ;;
+            5) fix_battlepass_npc; press_enter ;;
             "") return ;;
-            *) print_warning "Enter 1–4 or ENTER to go back."; press_enter ;;
+            *) print_warning "Enter 1–5 or ENTER to go back."; press_enter ;;
         esac
     done
 }

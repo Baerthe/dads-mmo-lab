@@ -16,6 +16,8 @@
 -- Double-load guard (safe across .reload ale cycles)
 if _G.ExchangeNpcLoaded then return end
 _G.ExchangeNpcLoaded = true
+-- Reset guard when the Lua state closes so re-load works cleanly
+RegisterServerEvent(16, function() _G.ExchangeNpcLoaded = nil end)
 
 local Config = {}
 
@@ -206,49 +208,49 @@ end
 
 local function eI_ItemOnHello(event, player, creature)
     if not player then return end
+    player:GossipClearMenu()
     if Config.TurnInItemEntry and Config.TurnInItemEntry[1] then
         for n = 1, #Config.TurnInItemEntry do
-            player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(n, 1), Config.ItemNpcEntry, n - 1)
+            player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(n, 1), Config.ItemNpcEntry, n)
         end
     end
     player:GossipMenuAddItem(GOSSIP_ICON_VENDOR, "Let's trade", Config.ItemNpcEntry, 10000)
-    player:GossipSendMenu(Config.ItemGossipText, creature, 0)
+    player:GossipSendMenu(Config.ItemGossipText, creature)
 end
 
 local function eI_ItemOnGossipSelect(event, player, object, sender, intid, code, menu_id)
     if not player then return end
     if intid < 1000 then
         player:GossipComplete()
-        local ExchangeId = intid + 1
-        -- FIX: original used undefined 'id' here; corrected to ExchangeId
+        local ExchangeId = intid
         if Config.TurnInItemAmount[ExchangeId] == nil then
             PrintError('ExchangeNpc: ExchangeId ' .. ExchangeId .. ' not found in config.')
             return
         end
+        player:GossipClearMenu()
         player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 1),  Config.ItemNpcEntry, intid + 1000)
         player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 5),  Config.ItemNpcEntry, intid + 2000)
         player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 10), Config.ItemNpcEntry, intid + 3000)
         player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 20), Config.ItemNpcEntry, intid + 4000)
-        player:GossipSendMenu(Config.ItemGossipConfirmationText, object, 0)
+        player:GossipSendMenu(Config.ItemGossipConfirmationText, object)
     elseif intid == 10000 then
         player:SendListInventory(object)
     else
         local ExchangeId, Amount, GiveAmount
         if intid >= 4000 then
-            ExchangeId = intid - 3999; Amount = 20
+            ExchangeId = intid - 4000; Amount = 20
         elseif intid >= 3000 then
-            ExchangeId = intid - 2999; Amount = 10
+            ExchangeId = intid - 3000; Amount = 10
         elseif intid >= 2000 then
-            ExchangeId = intid - 1999; Amount = 5
+            ExchangeId = intid - 2000; Amount = 5
         else
-            ExchangeId = intid - 999;  Amount = 1
+            ExchangeId = intid - 1000; Amount = 1
         end
         GiveAmount = Config.TurnInItemAmount[ExchangeId] * Amount
         local playerGuid = tonumber(tostring(player:GetGUID()))
         if player:HasItem(Config.TurnInItemEntry[ExchangeId], GiveAmount, false) then
             player:RemoveItem(Config.TurnInItemEntry[ExchangeId], GiveAmount)
             if Config.SendAsOneMail[ExchangeId] == true then
-                -- FIX: reward amount is GainItemAmount * Amount, not GiveAmount (turn-in qty)
                 SendMail(Config.ItemMailSubject, Config.ItemMailMessage, playerGuid, 0, 61, 5, 0, 0,
                     Config.GainItemEntry[ExchangeId], Config.GainItemAmount[ExchangeId] * Amount)
             else
@@ -269,23 +271,25 @@ end
 
 local function eI_HonorOnHello(event, player, creature)
     if not player then return end
+    player:GossipClearMenu()
     for n = 1, #Config.TurnInHonorAmount do
         local txt = 'Turn in ' .. Config.TurnInHonorAmount[n] .. ' honor to gain ' .. Config.GainGoldAmount[n] .. ' gold.'
-        player:GossipMenuAddItem(OPTION_ICON_CHAT, txt, Config.HonorNpcEntry, n - 1)
+        player:GossipMenuAddItem(OPTION_ICON_CHAT, txt, Config.HonorNpcEntry, n)
     end
-    player:GossipSendMenu(Config.HonorGossipText, creature, 0)
+    player:GossipSendMenu(Config.HonorGossipText, creature)
 end
 
 local function eI_HonorOnGossipSelect(event, player, object, sender, intid, code, menu_id)
     if not player then return end
     if intid < 1000 then
         player:GossipComplete()
-        local ExchangeId = intid + 1
+        local ExchangeId = intid
         local txt = 'Yes! Turn in ' .. Config.TurnInHonorAmount[ExchangeId] .. ' honor to gain ' .. Config.GainGoldAmount[ExchangeId] .. ' gold.'
+        player:GossipClearMenu()
         player:GossipMenuAddItem(OPTION_ICON_CHAT, txt, Config.HonorNpcEntry, intid + 1000)
-        player:GossipSendMenu(Config.HonorGossipConfirmationText, object, 0)
+        player:GossipSendMenu(Config.HonorGossipConfirmationText, object)
     else
-        local ExchangeId   = intid - 999
+        local ExchangeId   = intid - 1000
         local playerHonor  = player:GetHonorPoints()
         if playerHonor >= Config.TurnInHonorAmount[ExchangeId] then
             player:SetHonorPoints(playerHonor - Config.TurnInHonorAmount[ExchangeId])
@@ -335,10 +339,11 @@ end
 
 local function eI_TokenOnHello(event, player, creature)
     if not player then return end
+    player:GossipClearMenu()
     player:GossipMenuAddItem(OPTION_ICON_CHAT, Config.TokenGossipRefundText, Config.TokenNpcEntry, 1000)
     if not player:HasAchieved(452) and not player:HasAchieved(440) then
         player:SendBroadcastMessage('You need at least 10k honorable kills to buy epic PvP items.')
-        player:GossipSendMenu(Config.TokenGossipText, creature, 0)
+        player:GossipSendMenu(Config.TokenGossipText, creature)
         return
     end
     for n = 1, #Config.GainTokenEntry do
@@ -346,7 +351,7 @@ local function eI_TokenOnHello(event, player, creature)
             player:GossipMenuAddItem(OPTION_ICON_CHAT, Config.TokenGossipOptionText[n], Config.TokenNpcEntry, n)
         end
     end
-    player:GossipSendMenu(Config.TokenGossipText, creature, 0)
+    player:GossipSendMenu(Config.TokenGossipText, creature)
 end
 
 local function eI_TokenOnGossipSelect(event, player, object, sender, intid, code, menu_id)
