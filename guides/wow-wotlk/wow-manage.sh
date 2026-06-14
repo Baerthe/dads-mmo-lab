@@ -2,6 +2,8 @@
 # ============================================================
 #  Dad's MMO Lab — WoW Module Manager
 #  wow-manage.sh
+# ------------------------------------------------------------
+#  Mostly written by Baerthe (https://github.com/Baerthe)
 #
 #  Post-install management for AzerothCore WoW servers:
 #    - Add/remove modules (AH Bot, Solocraft, Transmog, etc.)
@@ -26,7 +28,7 @@
 #  https://github.com/DadsMmoLab/dads-mmo-lab
 # ============================================================
 
-MANAGER_VERSION="2.1.6 - ALE Drinker Edition"
+MANAGER_VERSION="2.2.1 - ALE House Edition"
 
 set -o pipefail
 
@@ -325,6 +327,33 @@ print_header() {
     printf '\033[%d;1H\033[J' "$MENU_START_ROW"
 }
 
+print_install_info() {
+    refresh_container_names
+    local state_str build_str _client_str
+    if container_running "$WORLD_CONTAINER"; then
+        state_str="${GREEN}● Running${RST}"
+    else
+        state_str="${DIM}○ Stopped${RST}"
+    fi
+    if [ "$SERVER_TYPE" = "playerbots" ]; then
+        build_str="${GREEN}source${RST}"
+    else
+        build_str="${YELLOW}prebuilt${RST}"
+    fi
+    printf "  ${WHITE}Server:${RST} ${CYAN}%s${RST}  ${GOLD}✦${RST}  ${WHITE}State:${RST} %b  ${GOLD}✦${RST}  ${WHITE}Build:${RST} %b\n" \
+        "$(basename "$SERVER_DIR")" "$state_str" "$build_str"
+    local _client_cache="$SERVER_DIR/.wow_client_dir"
+    if [ -n "$WOW_CLIENT_DIR" ]; then
+        _client_str="${GREEN}● Set${RST}  ${DIM}$(basename "$WOW_CLIENT_DIR")${RST}"
+    elif [ -f "$_client_cache" ] && [ -d "$(cat "$_client_cache")" ]; then
+        WOW_CLIENT_DIR=$(cat "$_client_cache")
+        _client_str="${GREEN}● Set${RST}  ${DIM}$(basename "$WOW_CLIENT_DIR")${RST}"
+    else
+        _client_str="${DIM}○ Not set${RST}"
+    fi
+    printf "  ${WHITE}WoW Client:${RST} %b  ${GOLD}✦${RST}  ${WHITE}Version:${RST} ${DIM}WotLK 3.3.5a${RST}\n" "$_client_str"
+}
+
 print_step()    { echo ""; echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
                     echo -e "${WHITE}${BOLD} $1${RST}"
                     echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"; }
@@ -372,9 +401,6 @@ _offer_npc_in_capitals() {
         190010)  slot=0 ;;
         999991)  slot=1 ;;
         601026)  slot=2 ;;
-        1116001) slot=3 ;;
-        90100)   slot=4 ;;
-        2069430) slot=5 ;;
         *)       slot="${_NPC_SPAWN_IDX:-0}" ;;
     esac
     _NPC_SPAWN_IDX=$((_NPC_SPAWN_IDX + 1))
@@ -429,6 +455,37 @@ _cmd_block_for() {
                 'npc add 999991 0 -8828.3 630.2 94.1 3.7   — Stormwind Arena Battlemaster (Alliance)' \
                 'npc add 999991 1 1600.2 -4413.7 17.5 4.5  — Orgrimmar Arena Battlemaster (Horde)'
             ;;
+        mod-arac)
+            printf '%s\n' \
+                'All Races All Classes (ARAC)' \
+                'Unlocks all race/class combinations not normally available — Night Elf Warrior, Undead Paladin, etc. DATA-ONLY: no worldserver rebuild required. Requires a world DB SQL import and updated DBC files on both server and client.' \
+                '' \
+                'Install requires three steps (configure handles all automatically):' \
+                '  1. Apply arac.sql to acore_world database' \
+                '  2. Copy DBFilesContent DBC files to server data/dbc/ directory' \
+                '  3. Copy Patch-A.MPQ to WoW client Data/ directory' \
+                '' \
+                'WARNING: Back up your database before applying ARAC SQL.' \
+                'Commands: (none — all race/class combos unlocked at character creation)'
+            ;;
+        mod-dungeon-master)
+            printf '%s\n' \
+                'Dungeon Master' \
+                'Procedural roguelike dungeon challenge system. Talk to the Dungeon Master NPC (entry 500000), pick a difficulty tier (Novice → Grandmaster), creature theme, and dungeon — then enter a repopulated instance scaled to your level. Roguelike mode chains dungeons with escalating difficulty, Mythic+-style affixes, and stacking stat buffs.' \
+                '' \
+                '37 dungeons, 9 creature themes, 6 difficulty tiers, party + solo support.' \
+                'NPC auto-spawns in all major cities on server start. SQL auto-applied on next start.' \
+                '' \
+                'GM Commands:' \
+                '[GM] .dm reload           — Reload Dungeon Master config' \
+                '[GM] .dm status           — Show active dungeon sessions' \
+                '[GM] .dm list             — List available dungeons' \
+                '[GM] .dm end              — Force-end active session' \
+                '[GM] .dm clearcooldown    — Clear per-character run cooldown' \
+                '' \
+                'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
+                'npc add 500000            — Dungeon Master NPC (auto-placed in all capitals at start)'
+            ;;
         mod-ah-bot)
             printf '%s\n' \
                 'Auction House Bot' \
@@ -469,9 +526,11 @@ _cmd_block_for() {
                 'Challenge Modes' \
                 'Adds optional self-imposed difficulty rules — Hardcore (death = permadeath), Semi-Hardcore, Ironman, and more. Players opt-in via an NPC (Shrine of Challenge) or the game settings menu. Requires EnablePlayerSettings = 1 in worldserver.conf.' \
                 '' \
+                'Source: nl-saw fork — OnPlayerResurrect signature patched automatically on install.' \
+                '' \
                 'Commands: (none — all functionality is accessed through the Shrine of Challenge NPC or in-game Settings menu)' \
                 '' \
-                'Configuration: edit mod_challenge_modes.conf after a worldserver rebuild.'
+                'Configuration: edit challenge_modes.conf after a worldserver rebuild.'
             ;;
         mod-solocraft)
             printf '%s\n' \
@@ -498,6 +557,18 @@ _cmd_block_for() {
                 'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
                 'npc add 190010 0 -8831.3 628.2 94.1 3.7   — Transmogrifier NPC, Stormwind (Alliance)' \
                 'npc add 190010 1 1597.2 -4415.7 17.5 4.5  — Transmogrifier NPC, Orgrimmar (Horde)'
+            ;;
+        mod-talentbutton)
+            printf '%s\n' \
+                'Talent Button' \
+                'Enables Dual Talent Specialization at level 10 (retail: level 40). Adds a button to unlearn talents from anywhere in the world — no class trainer visit required. Uses server-side script injection to provide seamless in-game UI integration.' \
+                '' \
+                'IMPORTANT: Requires an UNPATCHED WoW 3.3.5a client. Clients patched with tools' \
+                'like RCEPatcher will block the script injection and the button will not appear.' \
+                '' \
+                'Configuration: TalentButton.Enable = 1 in mod_talentbutton.conf' \
+                '' \
+                'Commands: (none — talent reset button available in the in-game talent UI)'
             ;;
         mod-individual-progression)
             printf '%s\n' \
@@ -528,6 +599,16 @@ _cmd_block_for() {
                 'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
                 'npc add 601026 0 -8825.3 632.2 94.1 3.7   — White Fang (Beastmaster), Stormwind (Alliance)' \
                 'npc add 601026 1 1603.2 -4411.7 17.5 4.5  — White Fang (Beastmaster), Orgrimmar (Horde)'
+            ;;
+        mod-quest-loot-party)
+            printf '%s\n' \
+                'Quest Loot Party' \
+                'Distributes quest item loot to ALL eligible party members when any one member' \
+                'loots the item — eliminating repeated boss kills when questing in a group.' \
+                '' \
+                'Configuration: QuestParty.Enable (on/off), QuestParty.Message (notify players)' \
+                '' \
+                'Commands: (none — fully automatic)'
             ;;
         mod-aoe-loot)
             printf '%s\n' \
@@ -615,37 +696,28 @@ _cmd_block_for() {
                 '.accountplaytime         — Show account-wide play time (alternate alias)' \
                 '.awplayed                — Show account-wide played time (alternate alias)'
             ;;
-        exchangenpc)
-            printf '%s\n' \
-                'Exchange NPC (ALE)' \
-                'Adds Roboto (entry 1116001), an NPC that lets players exchange currencies, items, and resources. Requires a world SQL file. NPC must be placed in the world after install.' \
-                '' \
-                'Commands: (none — all interaction is through Roboto NPC gossip menu)' \
-                '' \
-                'NPC Spawn Commands (worldserver console; prefix with . for in-game GM):' \
-                'npc add 1116001 0 -8822.3 634.2 94.1 3.7   — Roboto (Exchange NPC), Stormwind (Alliance)' \
-                'npc add 1116001 1 1606.2 -4409.7 17.5 4.5  — Roboto (Exchange NPC), Orgrimmar (Horde)'
-            ;;
         activechat)
             printf '%s\n' \
-                'Active Chat (ALE)' \
-                'Broadcasts a configurable activity reminder to all online players at a set interval. Useful for prompting idle players. Fully automatic — no player interaction needed.' \
+                'Azeroth Chatter (ALE)' \
+                'Fills world chat with ambient, lore-grounded RP chatter from a roster of recurring named residents — each with a faction, role, and personality. Time-of-day, seasonal, and event-aware. Far richer than the original ActiveChat.' \
                 '' \
-                'Commands: (none — message is broadcast on a server timer)'
+                'Commands: (none — chat fires on server timers automatically)'
             ;;
         levelupreward)
             printf '%s\n' \
                 'Level Up Reward (ALE)' \
-                'Automatically grants players an item or currency reward each time they level up. Reward type and quantity are configurable in the Lua script.' \
+                'Awards a random class-appropriate equippable item on every level-up. Quality is rolled (10% epic / 25% rare / 65% uncommon) with a fallback chain. Armor type scales with level (e.g. Mail → Plate at 40). First level-up also teaches all class weapon proficiencies.' \
                 '' \
                 'Commands: (none — reward is granted automatically on level-up)'
             ;;
         sod)
             printf '%s\n' \
                 'Season of Discovery Buff (ALE)' \
-                'Applies a configurable stat buff to all players on login, similar to WoW'"'"'s Season of Discovery rune bonuses. Useful for custom server balancing and boosting new players.' \
+                'Tiered Discoverer'"'"'s Delight XP bonus that scales down as players level. Awards +300% at levels 1-10, stepping down to +50% at 71-79. Level 80 gets no buff. Auto-updates on level-up. Requires server DBC files and client MPQ patches — installed automatically. Sourced from the Dad'"'"'s MMO Lab ALE-Kegs collection.' \
                 '' \
-                'Commands: (none — buff is applied automatically on login)'
+                'Files required: Server Files/dbc/*.dbc (server), Client Files/data/Patch-Z.MPQ + enUS/patch-enUS-3.MPQ + Interface/Icons/Buff_SoD.blp (client)' \
+                '' \
+                'Commands: (none — buff applied automatically on login and level-up)'
             ;;
         sitmeanrest)
             printf '%s\n' \
@@ -937,6 +1009,7 @@ DB_CONTAINER=""
 AUTH_CONTAINER=""
 DB_ROOT_PASSWORD="password"   # acore-docker default
 INGAME_COMMANDS_FILE=""       # set to $SERVER_DIR/ingame-commands.txt after detect_install
+WOW_CLIENT_DIR=""             # set by detect_wow_client; saved to $SERVER_DIR/.wow_client_dir
 
 # Session counter for NPC spawn coordinate staggering (deterministic per known entry)
 _NPC_SPAWN_IDX=0
@@ -948,13 +1021,17 @@ declare -a MODULE_REGISTRY=(
     "mod-ah-bot|Auction House Bot|https://github.com/azerothcore/mod-ah-bot.git|world"
     "mod-autobalance|Auto Balance (dynamic difficulty)|https://github.com/azerothcore/mod-autobalance.git|world"
     "mod-ale|AzerothCore Lua Engine (ALE)|https://github.com/azerothcore/mod-ale.git|"
-    "mod-player-bot-level-brackets|Bot Level Brackets (Playerbot distribution)|https://github.com/DustinHendrickson/mod-player-bot-level-brackets.git|world,characters"
-    "mod-challenge-modes|Challenge Modes (Hardcore, Iron Man, etc.)|https://github.com/ZhengPeiRu21/mod-challenge-modes.git|world,characters"
+    "mod-player-bot-level-brackets|Bot Level Brackets (Playerbot distribution)|https://github.com/DustinHendrickson/mod-player-bot-level-brackets.git|characters"
+    "mod-challenge-modes|Challenge Modes (Hardcore, Iron Man, etc.)|https://github.com/nl-saw/mod-challenge-modes.git|world,characters"
     "mod-individual-progression|Individual Progression (Vanilla → TBC → WotLK)|https://github.com/ZhengPeiRu21/mod-individual-progression.git|world,characters"
     "mod-junk-to-gold|Junk to Gold (auto-sell gray items)|https://github.com/noisiver/mod-junk-to-gold.git|world"
     "mod-learn-spells|Learn Spells on Levelup|https://github.com/azerothcore/mod-learn-spells.git|world"
     "mod-npc-beastmaster|NPC Beastmaster (pets for all classes)|https://github.com/azerothcore/mod-npc-beastmaster.git|world,characters"
+    "mod-quest-loot-party|Quest Loot Party (quest items drop for all eligible party members)|https://github.com/pangolp/mod-quest-loot-party.git|world"
+    "mod-arac|All Races All Classes (ARAC — data mod: SQL + DBC + MPQ)|https://github.com/heyitsbench/mod-arac.git|world"
+    "mod-dungeon-master|Dungeon Master (roguelike dungeon challenge system)|https://github.com/InstanceForge/mod-dungeon-master.git|world,characters"
     "mod-solocraft|Solocraft (solo dungeon/raid scaling)|https://github.com/azerothcore/mod-solocraft.git|world"
+    "mod-talentbutton|Talent Button (dual-spec at 10 + anywhere talent reset)|https://github.com/brian8544/mod-talentbutton.git|"
     "mod-transmog|Transmogrification|https://github.com/azerothcore/mod-transmog.git|world,characters"
 )
 
@@ -1072,6 +1149,98 @@ heal_legacy_module_dirs() {
         print_info    "Renaming modules/custom-login -> modules/mod-custom-login"
         mv "$legacy" "$correct"
     fi
+}
+
+# ─────────────────────────────────────────────────────────────
+# WOW CLIENT DETECTION
+# ─────────────────────────────────────────────────────────────
+# Probe common SteamOS/Ubuntu paths for a WoW WotLK client.
+# Saves the found path to $SERVER_DIR/.wow_client_dir for reuse.
+# Sets WOW_CLIENT_DIR; returns 0 on success, 1 if not found/skipped.
+detect_wow_client() {
+    [ -n "$WOW_CLIENT_DIR" ] && return 0
+    local _cache="$SERVER_DIR/.wow_client_dir"
+    if [ -f "$_cache" ]; then
+        local _saved; _saved=$(cat "$_cache")
+        if [ -d "$_saved" ]; then
+            WOW_CLIENT_DIR="$_saved"
+            return 0
+        fi
+    fi
+    print_step "Detecting WoW client install"
+    # Known parent directories that may contain a WoW client as a subdirectory
+    local -a _parent_dirs=(
+        "$HOME/.steam/steam/steamapps/common"
+        "$HOME/Steam/steamapps/common"
+        "$HOME/.local/share/Steam/steamapps/common"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common"
+        "$HOME/wow wotlk"
+        "$HOME/Games"
+        "$HOME"
+    )
+    # Known exact client folder names (direct children of above parents, or absolute)
+    local -a _names=(
+        "World of Warcraft"
+        "wow wotlk"
+        "wotlk"
+        "ChromieCraft_3.3.5a"
+        "wow 3.3.5a"
+        "wow-client-3.3.5a"
+        "wow-client"
+        "wow-wotlk-client"
+    )
+    local _wow_heuristic='[ -f "$p/Wow.exe" ] || [ -f "$p/wow.exe" ] || [ -f "$p/WowT.exe" ] || [ -d "$p/Interface" ]'
+    local pd n p
+    # 1) Scan every parent × name combination
+    for pd in "${_parent_dirs[@]}"; do
+        [ -d "$pd" ] || continue
+        for n in "${_names[@]}"; do
+            p="$pd/$n"
+            if [ -d "$p" ] && \
+                ( [ -f "$p/Wow.exe" ] || [ -f "$p/wow.exe" ] || \
+                  [ -f "$p/WowT.exe" ] || [ -d "$p/Interface" ] ); then
+                WOW_CLIENT_DIR="$p"
+                print_success "WoW client found: $WOW_CLIENT_DIR"
+                echo "$WOW_CLIENT_DIR" > "$_cache"
+                return 0
+            fi
+        done
+    done
+    # 2) Broad scan: any subdir of parent dirs that looks like a WoW install
+    for pd in "${_parent_dirs[@]}"; do
+        [ -d "$pd" ] || continue
+        local sub
+        while IFS= read -r sub; do
+            p="$pd/$sub"
+            if [ -d "$p" ] && \
+                ( [ -f "$p/Wow.exe" ] || [ -f "$p/wow.exe" ] || \
+                  [ -f "$p/WowT.exe" ] || [ -d "$p/Interface" ] ); then
+                WOW_CLIENT_DIR="$p"
+                print_success "WoW client found: $WOW_CLIENT_DIR"
+                echo "$WOW_CLIENT_DIR" > "$_cache"
+                return 0
+            fi
+        done < <(ls -1 "$pd" 2>/dev/null)
+    done
+    print_warning "WoW client not found automatically."
+    echo ""
+    printf "${WHITE}Enter full path to WoW client folder (leave blank to skip): ${RST}"
+    read -r _manual
+    # Expand ~ and strip surrounding quotes the user may have typed
+    _manual="${_manual#\"}" ; _manual="${_manual%\"}"
+    _manual="${_manual#\'}" ; _manual="${_manual%\'}"
+    _manual="${_manual/#\~/$HOME}"
+    if [ -n "$_manual" ] && [ -d "$_manual" ]; then
+        WOW_CLIENT_DIR="$_manual"
+        echo "$WOW_CLIENT_DIR" > "$_cache"
+        print_success "WoW client set to: $WOW_CLIENT_DIR"
+        return 0
+    elif [ -n "$_manual" ]; then
+        print_warning "Directory not found: $_manual"
+        print_info "Check the path and try again via option 16 in the main menu."
+    fi
+    print_warning "WoW client path not set — addon and client data auto-install skipped."
+    return 1
 }
 
 # Classify an install by looking at directory name AND, if needed,
@@ -1402,7 +1571,10 @@ server_attach() {
 # module: ls modules/<mod>/data/sql/db-<dbname>/
 # Format: "module-key|database|filename1.sql filename2.sql ..."
 declare -a MODULE_UPDATE_FILES=(
+    "mod-dungeon-master|acore_world|dm_setup.sql"
+    "mod-dungeon-master|acore_characters|dm_characters_setup.sql"
     "mod-ah-bot|acore_world|auctionhousebot_professionItems.sql mod_auctionhousebot.sql"
+    "mod-npc-beastmaster|acore_world|beastmaster_tames.sql beastmaster_tames_inserts.sql"
     "mod-transmog|acore_characters|trasmorg.sql"
     "mod-1v1-arena|acore_characters|"
     "mod-solocraft|acore_world|"
@@ -1422,15 +1594,14 @@ declare -a MODULE_UPDATE_FILES=(
 # inside ale_script_install() and the configure_ale_* functions.
 declare -a ALE_SCRIPT_REGISTRY=(
     "accountwide|Accountwide Systems (achievements, currency, mounts, pets)|https://github.com/Aldori15/azerothcore-eluna-accountwide.git"
-    "activechat|Active Chat (simulated world/guild chat for immersion)|https://github.com/Day36512/ActiveChat.git"
+    "activechat|Azeroth Chatter (lore-grounded ambient world RP chat)|https://github.com/svey-xyz/ActiveChat.git"
     "battlepass|Battle Pass System (XP progression + rewards + client addon)|https://github.com/Shonik/lua-battlepass.git"
-    "bmah|Black Market Auction House (MoP-style BMAH + client addon)|https://github.com/Youpeoples/Black-Market-Auction-House.git"
-    "exchangenpc|Exchange NPC (configurable item-exchange vendor NPC)|https://github.com/55Honey/Acore_ExchangeNpc.git"
-    "levelupreward|Level Up Reward (mail gold/items on level-up)|https://github.com/55Honey/Acore_LevelUpReward.git"
+    "bmah|Black Market Auction House (MoP-style BMAH + client addon)|https://github.com/DadsMmoLab/dads-mmo-lab.git|Update-Delta"
+    "levelupreward|Level Up Reward (random class-appropriate gear on every level-up)|https://github.com/phreeez/Levelreward.git"
     "lootpet|Loot Pet (vanity pet auto-loots nearby corpses)|https://github.com/Brytenwally/Lootpet.git"
     "paragon|Paragon Anniversary (endless post-80 stat progression + client addon)|https://github.com/Grim-Batol/Paragon-Anniversary.git"
     "sitmeanrest|Sit Means Rest (regen buff on /sit; strips on movement)|https://github.com/Brytenwally/SitMeansRest.git"
-    "sod|Season of Discovery Buffs (phased leveling XP rate bonus)|https://github.com/notepadguyOfficial/acore_sod.git"
+    "sod|Season of Discovery Buffs (phased leveling XP rate bonus)|https://github.com/DadsMmoLab/dads-mmo-lab.git|Update-Delta"
     "unlimitedammo|Unlimited Ammo (auto-refills Hunter arrows/bullets)|https://github.com/Day36512/Acore_Lua_Unlimited_Ammo.git"
 )
 
@@ -1527,86 +1698,137 @@ show_module_tracking() {
     fi
 }
 
-# Repair flow for a single module — clear its tracking rows.
-# Tries the known filename list first, then offers auto-discovery from
-# the module's SQL directory, then offers manual filename entry.
+# Compute SHA1 hash of a SQL file the same way AC's UpdateFetcher does.
+# Returns uppercase hex string; empty string on failure.
+compute_sql_hash() {
+    local file="$1"
+    if command -v sha1sum >/dev/null 2>&1; then
+        sha1sum "$file" 2>/dev/null | awk '{print toupper($1)}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 1 "$file" 2>/dev/null | awk '{print toupper($1)}'
+    else
+        # Fall back to computing inside the DB container
+        local bname; bname=$(basename "$file")
+        docker cp "$file" "$DB_CONTAINER:/tmp/$bname" 2>/dev/null
+        docker exec "$DB_CONTAINER" sha1sum "/tmp/$bname" 2>/dev/null \
+            | awk '{print toupper($1)}'
+        docker exec "$DB_CONTAINER" rm -f "/tmp/$bname" 2>/dev/null
+    fi
+}
+# Insert or update the updates-table row for a SQL file so AC will skip it.
+# Use this when the table already exists in the DB but AC has no record of
+# the file — which causes ac-db-import to fail with "Table X already exists".
+mark_sql_applied() {
+    local db_full="$1" sql_filename="$2"
+    local sql_file
+    sql_file=$(find "$SERVER_DIR/modules" -name "$sql_filename" 2>/dev/null | head -1)
+    if [ -z "$sql_file" ]; then
+        print_error "Cannot find '$sql_filename' in $SERVER_DIR/modules"
+        return 1
+    fi
+    local hash; hash=$(compute_sql_hash "$sql_file")
+    if [ -z "$hash" ]; then
+        print_error "Could not compute hash for $sql_filename"
+        return 1
+    fi
+    print_info "  File: $sql_file"
+    print_info "  Hash: ${hash:0:7}... (SHA1)"
+    docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" \
+        "$db_full" \
+        -e "INSERT INTO updates (name, hash, state, timestamp, speed)
+            VALUES ('$sql_filename', '$hash', 'RELEASED', NOW(), 0)
+            ON DUPLICATE KEY UPDATE hash='$hash', state='RELEASED';" 2>/dev/null && \
+        echo -e "  ${GREEN}✓${RST} Marked as applied: $sql_filename" || \
+        { print_error "Failed to write to $db_full.updates"; return 1; }
+}
+# Repair flow for a single module.
+# Two modes:
+#   MARK   — inserts the file's hash into updates so AC skips it.
+#            Use when: table exists in DB but no/wrong tracking row.
+#            Symptom: ac-db-import "Table X already exists" AND the
+#            SQL file does NOT use CREATE TABLE IF NOT EXISTS.
+#   CLEAR  — deletes the tracking row so AC re-applies the SQL.
+#            Use when: the module SQL file changed (hash mismatch) AND
+#            the SQL uses CREATE TABLE IF NOT EXISTS / INSERT IGNORE.
 repair_module() {
     local key="$1" db_full="$2" known_files="$3"
-
     print_step "Repairing: $key"
     show_module_tracking "$key"
     echo ""
-
-    # Determine which SQL filenames to clear
-    local files_to_clear=""
-
-    # 1. Try the known list first
+    # Resolve file list (known → auto-discover → manual)
+    local files_to_fix=""
     if [ -n "$known_files" ]; then
-        echo -e "${WHITE}Known SQL files to clear from ${db_full}.updates:${RST}"
+        echo -e "${WHITE}Known SQL files for ${db_full}:${RST}"
         local f
-        for f in $known_files; do
-            echo -e "  ${CYAN}$f${RST}"
-        done
+        for f in $known_files; do echo -e "  ${CYAN}$f${RST}"; done
         echo ""
-        if ask_yes_no "Clear tracking rows for these files?"; then
-            files_to_clear="$known_files"
-        fi
+        if ask_yes_no "Use these files?"; then files_to_fix="$known_files"; fi
     fi
-
-    # 2. If no known list or user declined, offer auto-discovery
-    if [ -z "$files_to_clear" ]; then
-        # Map db_full back to db_short for the sql dir
+    if [ -z "$files_to_fix" ]; then
         local db_short="${db_full#acore_}"
-        local discovered
-        discovered=$(discover_module_sql_files "$key" "$db_short")
+        local discovered; discovered=$(discover_module_sql_files "$key" "$db_short")
         if [ -n "$discovered" ]; then
-            echo -e "${WHITE}Auto-discovered SQL files in module's sql dir:${RST}"
+            echo -e "${WHITE}Auto-discovered SQL files:${RST}"
             local f
-            for f in $discovered; do
-                echo -e "  ${CYAN}$f${RST}"
-            done
+            for f in $discovered; do echo -e "  ${CYAN}$f${RST}"; done
             echo ""
-            if ask_yes_no "Clear tracking rows for these auto-discovered files?"; then
-                files_to_clear="$discovered"
+            if ask_yes_no "Use these auto-discovered files?"; then
+                files_to_fix="$discovered"
             fi
         fi
     fi
-
-    # 3. Final fallback: manual entry
-    if [ -z "$files_to_clear" ]; then
+    if [ -z "$files_to_fix" ]; then
         echo ""
-        echo -e "${WHITE}Enter SQL filenames manually (space-separated)${RST}"
-        echo -e "${DIM}Example: foo.sql bar.sql${RST}"
-        echo -e "${DIM}Or just press ENTER to skip this module.${RST}"
+        echo -e "${WHITE}Enter SQL filenames manually (space-separated, ENTER to skip):${RST}"
         printf "${WHITE}Files: ${RST}"
-        read -r files_to_clear
-        [ -z "$files_to_clear" ] && { print_info "Skipped."; return 0; }
+        read -r files_to_fix
+        [ -z "$files_to_fix" ] && { print_info "Skipped."; return 0; }
     fi
-
-    # Apply the clears, report per-file
+    # Choose repair mode
     echo ""
-    local cleared=0 missing=0
+    echo -e "${WHITE}${BOLD}Choose repair mode:${RST}"
+    echo -e "  ${CYAN}M)${RST} Mark as applied   — table exists in DB, AC has no record of it"
+    echo -e "     ${DIM}(use when ac-db-import says 'Table X already exists')${RST}"
+    echo -e "  ${CYAN}C)${RST} Clear tracking    — force AC to re-apply the SQL on next start"
+    echo -e "     ${DIM}(safe only if the SQL uses CREATE TABLE IF NOT EXISTS / INSERT IGNORE)${RST}"
+    echo ""
+    local mode=""
+    while [ -z "$mode" ]; do
+        printf "${WHITE}Choice [M/C]: ${RST}"
+        read -r mode
+        case "${mode,,}" in
+            m) mode="mark" ;;
+            c) mode="clear" ;;
+            *) mode=""; echo "Please enter M or C." ;;
+        esac
+    done
+    echo ""
+    local ok=0 fail=0
     local f
-    for f in $files_to_clear; do
-        if clear_update_tracking_row "$db_full" "$f"; then
-            echo -e "  ${GREEN}✓${RST} Cleared: $f"
-            cleared=$((cleared + 1))
+    for f in $files_to_fix; do
+        if [ "$mode" = "mark" ]; then
+            mark_sql_applied "$db_full" "$f" && ok=$((ok + 1)) || fail=$((fail + 1))
         else
-            echo -e "  ${DIM}○${RST} Not found in updates: $f"
-            missing=$((missing + 1))
+            if clear_update_tracking_row "$db_full" "$f"; then
+                echo -e "  ${GREEN}✓${RST} Cleared: $f"
+                ok=$((ok + 1))
+            else
+                echo -e "  ${DIM}○${RST} Not found in updates: $f"
+                fail=$((fail + 1))
+            fi
         fi
     done
     echo ""
-    if [ "$cleared" -gt 0 ]; then
-        print_success "Cleared $cleared tracking row(s) for $key"
-        print_info "AzerothCore will re-apply this SQL on next server start."
+    if [ "$ok" -gt 0 ] && [ "$mode" = "mark" ]; then
+        print_success "$ok file(s) marked as applied — ac-db-import will skip them."
+        print_info "Restart the server now; no further SQL action needed."
+    elif [ "$ok" -gt 0 ]; then
+        print_success "Cleared $ok tracking row(s) — AC will re-apply SQL on next start."
     fi
-    if [ "$cleared" -eq 0 ] && [ "$missing" -gt 0 ]; then
-        print_info "All filenames searched were already absent from updates table."
-        print_info "This could mean:"
-        print_info "  • The filenames don't exactly match what AC tracked"
-        print_info "  • The module's SQL was never applied (fresh install case)"
-        print_info "  • The repair was already run successfully before"
+    if [ "$fail" -gt 0 ] && [ "$mode" = "mark" ]; then
+        print_warning "$fail file(s) could not be marked — check $SERVER_DIR/modules for the files."
+    elif [ "$fail" -gt 0 ]; then
+        print_info "$fail file(s) were not in the updates table (already clear or never tracked)."
     fi
 }
 
@@ -1618,14 +1840,16 @@ repair_install_state() {
     echo -e "${WHITE}  • ${CYAN}ERROR 1050: Table 'X' already exists${RST}"
     echo -e "${WHITE}  • ${CYAN}ac-db-import: didn't complete successfully: exit 1${RST}"
     echo ""
-    echo -e "${WHITE}${BOLD}How this works:${RST}"
-    echo -e "${WHITE}  This clears rows from AzerothCore's ${CYAN}updates${WHITE} tracking table${RST}"
-    echo -e "${WHITE}  for selected modules. On next server start, AC will detect${RST}"
-    echo -e "${WHITE}  the SQL files as needing application and run them. Module SQL${RST}"
-    echo -e "${WHITE}  uses IF NOT EXISTS semantics, so re-apply is safe even when${RST}"
-    echo -e "${WHITE}  the tables already exist.${RST}"
+    echo -e "${WHITE}${BOLD}Two repair modes (you choose per-module):${RST}"
+    echo -e "${WHITE}  ${CYAN}Mark as applied${RST}${WHITE} — inserts the file's hash so AC skips it.${RST}"
+    echo -e "${WHITE}    Use when: table already exists, no tracking row, SQL lacks IF NOT EXISTS.${RST}"
+    echo -e "${WHITE}    (e.g. mod-ah-bot's auctionhousebot_professionItems.sql)${RST}"
     echo ""
-    echo -e "${GREEN}This function does NOT drop tables — it's safe and non-destructive.${RST}"
+    echo -e "${WHITE}  ${CYAN}Clear tracking${RST}${WHITE} — deletes the row so AC re-applies the SQL.${RST}"
+    echo -e "${WHITE}    Use when: the SQL file changed (hash mismatch) and it uses${RST}"
+    echo -e "${WHITE}    CREATE TABLE IF NOT EXISTS / INSERT IGNORE semantics.${RST}"
+    echo ""
+    echo -e "${GREEN}Neither mode drops tables — both are safe and non-destructive.${RST}"
     echo ""
 
     # Need DB running
@@ -1699,7 +1923,9 @@ repair_install_state() {
         if [ -z "${repair_files[$i]}" ]; then
             marker=" ${DIM}(manual filename entry needed)${RST}"
         fi
-        printf "  %2d) %s%b\n" "$((i + 1))" "${repair_keys[$i]}" "$marker"
+        local db_label=""
+        [ -n "${repair_dbs[$i]}" ] && db_label=" ${DIM}(${repair_dbs[$i]})${RST}"
+        printf "  %2d) %s%b%b\n" "$((i + 1))" "${repair_keys[$i]}" "$db_label" "$marker"
     done
     echo ""
     echo -e "${WHITE}  A) Repair ALL listed modules${RST}"
@@ -1742,7 +1968,7 @@ repair_install_state() {
     esac
 
     echo ""
-    print_info "Done. Start the server (menu option 9) for AC to re-apply cleared SQL."
+    print_info "Done. Restart the server (menu option 9) to apply changes."
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -1806,11 +2032,22 @@ module_remove() {
         return 0
     fi
 
+    if [ "$key" = "mod-arac" ]; then
+        print_warning "mod-arac is data-only. Removing the clone does NOT revert:"
+        print_info "  • arac.sql data already imported into acore_world"
+        print_info "  • DBC files already copied to the server data volume"
+        print_info "  • Patch-A.MPQ already installed in your WoW client Data/"
+        print_info "To fully uninstall ARAC, those must be reverted manually."
+        echo ""
+    fi
+
     if ask_yes_no "  Remove module files from $SERVER_DIR/modules/$key?"; then
         rm -rf "$SERVER_DIR/modules/$key"
         print_success "Module files removed"
-        print_info "(Database tables/rows from this module are kept — removing"
-        print_info " them risks data loss and they're harmless to leave.)"
+        if [ "$key" != "mod-arac" ]; then
+            print_info "(Database tables/rows from this module are kept — removing"
+            print_info " them risks data loss and they're harmless to leave.)"
+        fi
     fi
 }
 
@@ -2133,6 +2370,42 @@ configure_module_bot_level_brackets() {
 }
 
 # ─────────────────────────────────────────────────────────────
+# configure_module_quest_loot_party
+#   Copies mod-quest-loot-party.conf.dist and opens it.
+#   Two settings: QuestParty.Enable and QuestParty.Message
+# ─────────────────────────────────────────────────────────────
+configure_module_quest_loot_party() {
+    print_step "Configuring Quest Loot Party"
+    local module_dir="$SERVER_DIR/modules/mod-quest-loot-party"
+    if [ ! -d "$module_dir" ]; then
+        print_error "Quest Loot Party module not installed (expected at $module_dir)."
+        return 1
+    fi
+    local conf_dist="$module_dir/conf/mod-quest-loot-party.conf.dist"
+    local conf_dest="$SERVER_DIR/env/dist/etc/modules/mod-quest-loot-party.conf"
+    mkdir -p "$SERVER_DIR/env/dist/etc/modules"
+    if [ ! -f "$conf_dest" ]; then
+        if [ -f "$conf_dist" ]; then
+            cp "$conf_dist" "$conf_dest"
+            print_success "Created $conf_dest"
+        else
+            print_warning "conf.dist not found at $conf_dist"
+            print_info "The worldserver must be rebuilt once before conf files are generated."
+            print_info "After rebuilding, re-run this configure option."
+            return 0
+        fi
+    fi
+    echo ""
+    echo -e "${WHITE}Settings:${RST}"
+    printf "  ${CYAN}%-30s${RST} ${WHITE}%s${RST}\n" "QuestParty.Enable" "true = on / false = off (default: true)"
+    printf "  ${CYAN}%-30s${RST} ${WHITE}%s${RST}\n" "QuestParty.Message" "true = notify players / false = silent (default: true)"
+    echo ""
+    _open_text_file "$conf_dest"
+    echo ""
+    print_info "Restart the worldserver for conf changes to take effect."
+}
+
+# ─────────────────────────────────────────────────────────────
 # configure_module_npc_beastmaster
 #   Copies mod_npc_beastmaster.conf.dist and opens it.
 #   Reminds user about the Creatures.CustomIDs worldserver.conf tip.
@@ -2172,6 +2445,177 @@ configure_module_npc_beastmaster() {
 }
 
 # ─────────────────────────────────────────────────────────────
+# configure_module_dungeon_master
+#   Copies mod_dungeon_master.conf.dist → mod_dungeon_master.conf
+#   and opens it for editing.
+# ─────────────────────────────────────────────────────────────
+configure_module_dungeon_master() {
+    print_step "Configuring Dungeon Master"
+    local module_dir="$SERVER_DIR/modules/mod-dungeon-master"
+    if [ ! -d "$module_dir" ]; then
+        print_error "Dungeon Master module not installed (expected at $module_dir)."
+        return 1
+    fi
+    local conf_dist="$module_dir/conf/mod_dungeon_master.conf.dist"
+    local conf_dest="$SERVER_DIR/env/dist/etc/modules/mod_dungeon_master.conf"
+    mkdir -p "$SERVER_DIR/env/dist/etc/modules"
+    if [ ! -f "$conf_dest" ]; then
+        if [ -f "$conf_dist" ]; then
+            cp "$conf_dist" "$conf_dest"
+            print_success "Created $conf_dest"
+        else
+            print_warning "conf.dist not found at $conf_dist"
+            print_info "The worldserver must be rebuilt once before conf files are generated."
+            print_info "After rebuilding, re-run this configure option."
+            return 0
+        fi
+    fi
+    echo ""
+    print_info "Key settings: Scaling.LevelBand, Rewards.BaseGold, Roguelike.Enable"
+    print_info "NPC entry 500000 spawns automatically in all major cities on server start."
+    echo ""
+    _open_text_file "$conf_dest"
+    echo ""
+    print_info "Restart the worldserver for conf changes to take effect."
+}
+
+# ─────────────────────────────────────────────────────────────
+# configure_module_talentbutton
+#   Copies mod_talentbutton.conf.dist → mod_talentbutton.conf
+#   and opens it for editing.
+# ─────────────────────────────────────────────────────────────
+configure_module_talentbutton() {
+    print_step "Configuring Talent Button"
+    local module_dir="$SERVER_DIR/modules/mod-talentbutton"
+    if [ ! -d "$module_dir" ]; then
+        print_error "Talent Button module not installed (expected at $module_dir)."
+        return 1
+    fi
+    local conf_dist="$module_dir/conf/mod_talentbutton.conf.dist"
+    local conf_dest="$SERVER_DIR/env/dist/etc/modules/mod_talentbutton.conf"
+    mkdir -p "$SERVER_DIR/env/dist/etc/modules"
+    if [ ! -f "$conf_dest" ]; then
+        if [ -f "$conf_dist" ]; then
+            cp "$conf_dist" "$conf_dest"
+            print_success "Created $conf_dest"
+        else
+            print_warning "conf.dist not found at $conf_dist"
+            print_info "The worldserver must be rebuilt once before conf files are generated."
+            print_info "After rebuilding, re-run this configure option."
+            return 0
+        fi
+    fi
+    echo ""
+    print_warning "Requires an UNPATCHED WoW 3.3.5a client — RCEPatcher clients will not see the button."
+    echo ""
+    _open_text_file "$conf_dest"
+    echo ""
+    print_info "Restart the worldserver for conf changes to take effect."
+}
+
+# ─────────────────────────────────────────────────────────────
+# configure_mod_arac
+#   Applies ARAC SQL, copies server DBC files, and offers to
+#   install Patch-A.MPQ to the WoW client Data/ directory.
+#   mod-arac is data-only — no worldserver rebuild required.
+# ─────────────────────────────────────────────────────────────
+configure_mod_arac() {
+    print_step "Configuring All Races All Classes (ARAC)"
+    local module_dir="$SERVER_DIR/modules/mod-arac"
+    if [ ! -d "$module_dir" ]; then
+        print_error "mod-arac not installed (expected at $module_dir)."
+        return 1
+    fi
+    refresh_container_names
+    local arac_marker="$SERVER_DIR/modules/mod-arac/.arac_sql_applied"
+    # ── Step 1: SQL ───────────────────────────────────────────
+    local arac_sql="$module_dir/data/sql/db-world/arac.sql"
+    if [ ! -f "$arac_sql" ]; then
+        print_error "arac.sql not found at: $arac_sql"
+        return 1
+    fi
+    echo ""
+    print_step "ARAC — Step 1: Apply SQL to acore_world"
+    if [ -f "$arac_marker" ]; then
+        print_info "ARAC SQL was previously applied (marker file present)."
+        if ! ask_yes_no "Re-apply arac.sql anyway? (only needed after a DB wipe)"; then
+            print_info "SQL step skipped."
+        else
+            if ! ensure_db_running; then
+                print_error "Database is not available — start the server first."
+                return 1
+            fi
+            if ale_run_sql_file "acore_world" "$arac_sql"; then
+                touch "$arac_marker"
+                print_success "ARAC SQL re-applied."
+            else
+                print_error "SQL apply failed — check DB logs."
+                return 1
+            fi
+        fi
+    else
+        print_warning "Back up your database before applying ARAC SQL (it modifies race/class unlock data)."
+        echo ""
+        if ask_yes_no "Apply arac.sql to acore_world database now?"; then
+            if ! ensure_db_running; then
+                print_error "Database is not available — start the server first."
+                return 1
+            fi
+            if ale_run_sql_file "acore_world" "$arac_sql"; then
+                touch "$arac_marker"
+                print_success "ARAC SQL applied to acore_world."
+            else
+                print_error "SQL apply failed — check DB logs."
+                return 1
+            fi
+        else
+            print_info "SQL skipped. Run manually: docker exec -i \$DB_CONTAINER mysql -uroot -p... acore_world < arac.sql"
+        fi
+    fi
+    # ── Step 2: Server DBC files ──────────────────────────────
+    echo ""
+    print_step "ARAC — Step 2: Copy DBC files to server"
+    local dbc_src="$module_dir/patch-contents/DBFilesContent"
+    if [ -d "$dbc_src" ]; then
+        if ask_yes_no "Copy ARAC DBC files to server data/dbc/ now?"; then
+            copy_server_dbc "$dbc_src" "ARAC server DBC files"
+        else
+            print_info "DBC copy skipped. Copy manually:"
+            print_info "  docker run --rm -v ac-client-data:/data -v $dbc_src:/src:ro alpine sh -c 'cp /src/*.dbc /data/dbc/'"
+        fi
+    else
+        print_warning "DBC source not found at: $dbc_src"
+        print_info "Try re-installing to refresh the clone."
+    fi
+    # ── Step 3: Client Patch-A.MPQ ────────────────────────────
+    echo ""
+    print_step "ARAC — Step 3: Install Patch-A.MPQ to WoW client"
+    local mpq_src="$module_dir/Patch-A.MPQ"
+    if [ -f "$mpq_src" ]; then
+        echo -e "${WHITE}Patch-A.MPQ must be placed in your WoW client Data/ directory.${RST}"
+        if ask_yes_no "Auto-install Patch-A.MPQ to WoW client Data/ now?"; then
+            if detect_wow_client; then
+                local mpq_dest="$WOW_CLIENT_DIR/Data/Patch-A.MPQ"
+                if cp "$mpq_src" "$mpq_dest"; then
+                    print_success "Patch-A.MPQ installed → $mpq_dest"
+                else
+                    print_error "Copy failed — check permissions on $WOW_CLIENT_DIR/Data/"
+                fi
+            fi
+        else
+            print_info "Manual install: copy $mpq_src"
+            print_info "  to your WoW client Data/ directory."
+        fi
+    else
+        print_warning "Patch-A.MPQ not found at: $mpq_src"
+        print_info "Download it manually from: https://github.com/heyitsbench/mod-arac"
+    fi
+    echo ""
+    print_info "mod-arac is data-only — no worldserver rebuild is required."
+    print_info "Restart the worldserver to load the new race/class combinations."
+}
+
+# ─────────────────────────────────────────────────────────────
 # ALE LUA SCRIPT MANAGEMENT
 # ─────────────────────────────────────────────────────────────
 # Lua scripts that extend gameplay via the ALE engine.
@@ -2192,19 +2636,13 @@ ale_lua_is_deployed() {
     case "$key" in
         accountwide)   [ -d "$lua_dir/accountwide" ] && \
                         ls "$lua_dir/accountwide"/*.lua &>/dev/null ;;
-        levelupreward) ls "$lua_dir"/LevelUpReward*.lua &>/dev/null 2>&1 || \
-                        ls "$lua_dir"/levelup*.lua &>/dev/null 2>&1 || \
-                        ls "$lua_dir"/LevelUp*.lua &>/dev/null 2>&1 ;;
-        exchangenpc)   ls "$lua_dir"/Exchange*.lua &>/dev/null 2>&1 || \
-                        ls "$lua_dir"/exchange*.lua &>/dev/null 2>&1 ;;
-        activechat)    [ -d "$lua_dir/activechat" ] ;;
+        levelupreward) ls "$lua_dir"/levelreward.lua &>/dev/null 2>&1 ;;
+        activechat)    [ -d "$lua_dir/AzerothChatter" ] ;;
         battlepass)    [ -d "$lua_dir/battlepass" ] ;;
         paragon)       [ -d "$lua_dir/paragon" ] ;;
-        bmah)          [ -f "$lua_dir/bmah_server.lua" ] ;;
+        bmah)          [ -f "$lua_dir/BMAH.lua" ] ;;
         lootpet)       [ -f "$lua_dir/LootPet.lua" ] ;;
-        sod)           ls "$lua_dir"/sod*.lua &>/dev/null 2>&1 || \
-                        ls "$lua_dir"/SoD*.lua &>/dev/null 2>&1 || \
-                        ls "$lua_dir"/season*.lua &>/dev/null 2>&1 ;;
+        sod)           [ -f "$lua_dir/SOD.lua" ] ;;
         sitmeanrest)   [ -f "$lua_dir/SitMeansRest.lua" ] ;;
         unlimitedammo) [ -f "$lua_dir/UnlimitedAmmo.lua" ] ;;
         *)             false ;;
@@ -2214,17 +2652,16 @@ ale_lua_is_deployed() {
 # Ensure the database container is up. Returns 1 if it cannot start.
 ensure_db_running() {
     refresh_container_names
-    if container_running "$DB_CONTAINER"; then
-        return 0
+    if ! container_running "$DB_CONTAINER"; then
+        print_info "Starting database container..."
+        (cd "$SERVER_DIR" && docker compose up -d ac-database 2>/dev/null) || true
+        refresh_container_names
     fi
-    print_info "Starting database container..."
-    (cd "$SERVER_DIR" && docker compose up -d ac-database 2>/dev/null) || true
-    refresh_container_names
+    # Always validate MySQL is accepting connections, even if container was already up
     local i
     for i in $(seq 1 15); do
         if docker exec "$DB_CONTAINER" mysqladmin ping \
             -uroot -p"$DB_ROOT_PASSWORD" &>/dev/null 2>&1; then
-            print_success "Database is up."
             return 0
         fi
         sleep 2
@@ -2245,8 +2682,170 @@ ale_run_sql_file() {
     if docker exec -i "$DB_CONTAINER" mysql \
         -uroot -p"$DB_ROOT_PASSWORD" "$db_name" < "$sql_file" 2>&1; then
         print_success "SQL applied: $(basename "$sql_file")"
+        return 0
     else
-        print_warning "SQL had errors — table may already exist, which is usually safe."
+        print_warning "SQL apply failed: $(basename "$sql_file") — check database logs."
+        return 1
+    fi
+}
+
+# Copy a WoW addon folder into the client's Interface/AddOns/.
+# Usage: copy_client_addon <src_dir> <addon_name> [description]
+# Calls detect_wow_client if WOW_CLIENT_DIR is not yet set.
+copy_client_addon() {
+    local src_dir="$1" addon_name="$2" desc="${3:-$2}"
+    if ! detect_wow_client; then
+        print_info "Manual install: copy ${CYAN}$src_dir${RST} → <WoW>/Interface/AddOns/$addon_name/"
+        return 1
+    fi
+    local dest="$WOW_CLIENT_DIR/Interface/AddOns/$addon_name"
+    if [ ! -d "$src_dir" ]; then
+        print_warning "Addon source not found: $src_dir"
+        print_info "Manual: cp -r \"$src_dir\" \"$dest\""
+        return 1
+    fi
+    mkdir -p "$dest"
+    if cp -r "$src_dir/." "$dest/"; then
+        print_success "$desc installed → $dest"
+        return 0
+    else
+        print_warning "Copy failed — install manually:"
+        print_info "  cp -r \"$src_dir/\" \"$dest/\""
+        return 1
+    fi
+}
+
+# Merge a full Interface/ tree into the client's Interface/ directory.
+# Used for mods (e.g. Paragon) that ship custom Interface subfolders
+# rather than a self-contained AddOns entry.
+# Usage: copy_client_interface <src_interface_dir> [description]
+copy_client_interface() {
+    local src_dir="$1" desc="${2:-Interface files}"
+    if ! detect_wow_client; then
+        print_info "Manual install: merge ${CYAN}$src_dir${RST} → <WoW>/Interface/"
+        return 1
+    fi
+    local dest="$WOW_CLIENT_DIR/Interface"
+    if [ ! -d "$src_dir" ]; then
+        print_warning "Interface source not found: $src_dir"
+        print_info "Manual: cp -r \"$src_dir/.\" \"$dest/\""
+        return 1
+    fi
+    mkdir -p "$dest"
+    if cp -r "$src_dir/." "$dest/"; then
+        print_success "$desc merged → $dest"
+        return 0
+    else
+        print_warning "Copy failed — install manually:"
+        print_info "  cp -r \"$src_dir/.\" \"$dest/\""
+        return 1
+    fi
+}
+
+# Copy files from a Data/ source tree into the WoW client's Data/ directory.
+# Handles MPQ patches and loose Data files (NOT Interface/ content).
+# Usage: copy_client_data <src_data_dir> [description]
+# src_data_dir should contain items like Patch-Z.MPQ, enUS/, etc.
+copy_client_data() {
+    local src_dir="$1" desc="${2:-Data files}"
+    if ! detect_wow_client; then
+        print_info "Manual install: merge ${CYAN}$src_dir${RST} → <WoW>/Data/"
+        return 1
+    fi
+    local dest="$WOW_CLIENT_DIR/Data"
+    if [ ! -d "$src_dir" ]; then
+        print_warning "Data source not found: $src_dir"
+        print_info "Manual: cp -r \"$src_dir/.\" \"$dest/\""
+        return 1
+    fi
+    mkdir -p "$dest"
+    if cp -r "$src_dir/." "$dest/"; then
+        print_success "$desc copied → $dest"
+        return 0
+    else
+        print_warning "Copy failed — install manually:"
+        print_info "  cp -r \"$src_dir/.\" \"$dest/\""
+        return 1
+    fi
+}
+
+# Copy custom DBC files into the AzerothCore server data volume.
+# The ac-client-data volume is mounted :ro on the worldserver, so docker cp
+# into the worldserver container won't work. Instead we spin up a temporary
+# alpine container with the volume mounted read-write, copy the files, then
+# remove the helper container.
+# Usage: copy_server_dbc <src_dbc_dir> [description]
+copy_server_dbc() {
+    local src_dir="$1" desc="${2:-DBC files}"
+    if [ ! -d "$src_dir" ]; then
+        print_warning "DBC source not found: $src_dir"
+        return 1
+    fi
+    local -a _dbc_files=("$src_dir"/*.dbc)
+    if [ ! -f "${_dbc_files[0]}" ]; then
+        print_warning "No .dbc files found in: $src_dir"
+        return 1
+    fi
+    print_info "Detecting data volume name..."
+    # Inspect worldserver mounts to find the ac-client-data volume name
+    local _vol_name=""
+    if [ -n "$WORLD_CONTAINER" ]; then
+        _vol_name=$(docker inspect "$WORLD_CONTAINER" \
+            --format '{{range .Mounts}}{{if eq .Destination "/azerothcore/env/dist/data"}}{{.Name}}{{end}}{{end}}' \
+            2>/dev/null)
+    fi
+    # Fall back to the default volume name if inspect fails
+    [ -z "$_vol_name" ] && _vol_name="ac-client-data"
+    print_info "Using data volume: $_vol_name"
+    # Spin up a temporary alpine container with the volume mounted rw
+    local _ok=true
+    local f
+    for f in "${_dbc_files[@]}"; do
+        [ -f "$f" ] || continue
+        if ! docker run --rm \
+                -v "$_vol_name:/data" \
+                -v "$f:/src/$(basename "$f"):ro" \
+                alpine \
+                cp "/src/$(basename "$f")" "/data/dbc/$(basename "$f")"; then
+            print_warning "Failed to copy $(basename "$f") into volume"
+            _ok=false
+        fi
+    done
+    if [ "$_ok" = true ]; then
+        print_success "$desc installed → $_vol_name:/azerothcore/env/dist/data/dbc/"
+        print_info "Restart the worldserver for DBC changes to take effect."
+        return 0
+    else
+        print_warning "Some DBC files failed. Manual steps:"
+        print_info "  docker run --rm -v $_vol_name:/data -v \$(pwd):/src alpine \\"
+        print_info "    sh -c 'cp /src/*.dbc /data/dbc/'"
+        return 1
+    fi
+}
+
+# Interactive: set or change the WoW client folder.
+# Called from the main menu (option 16) and optionally from first-run.
+configure_wow_client() {
+    echo ""
+    print_step "WoW Client Folder"
+    if [ -n "$WOW_CLIENT_DIR" ]; then
+        echo -e "${WHITE}Current client path:${RST}  ${CYAN}$WOW_CLIENT_DIR${RST}"
+        echo ""
+        if ! ask_yes_no "Detect/change the WoW client folder?"; then
+            return 0
+        fi
+    fi
+    # Clear cached value so detect_wow_client re-probes
+    WOW_CLIENT_DIR=""
+    local _cache="$SERVER_DIR/.wow_client_dir"
+    rm -f "$_cache" 2>/dev/null
+    if detect_wow_client; then
+        echo ""
+        print_success "WoW client folder set to: $WOW_CLIENT_DIR"
+        echo -e "${DIM}Path saved — addon auto-install will use this location.${RST}"
+    else
+        echo ""
+        print_warning "No WoW client folder set. Addon auto-install will offer manual paths."
     fi
 }
 
@@ -2258,19 +2857,30 @@ configure_ale_battlepass() {
 
     print_step "Battle Pass — SQL & Configuration"
 
-    # Apply SQL
+    # Apply SQL — track success of both required files
+    local _bp_world_ok=false _bp_chars_ok=false
     print_info "Applying Battle Pass SQL (requires database to be running)..."
     if ensure_db_running; then
-        ale_run_sql_file "acore_world"      "$clone_dir/sql/battlepass_world.sql"
-        ale_run_sql_file "acore_characters" "$clone_dir/sql/battlepass_characters.sql"
+        ale_run_sql_file "acore_world"      "$clone_dir/sql/battlepass_world.sql"      && _bp_world_ok=true
+        ale_run_sql_file "acore_characters" "$clone_dir/sql/battlepass_characters.sql" && _bp_chars_ok=true
+        # Create the Battle Pass vendor NPC (entry 90100) — not included in upstream SQL
+        if [ "$_bp_world_ok" = true ]; then
+            print_info "Battle Pass world SQL applied — NPC will be created at end of configure."
+        fi
+        if [ "$_bp_world_ok" = false ] || [ "$_bp_chars_ok" = false ]; then
+            print_warning "Battle Pass install incomplete — one or more SQL files failed:"
+            [ "$_bp_world_ok"  = false ] && print_info "  FAILED: $clone_dir/sql/battlepass_world.sql → acore_world"
+            [ "$_bp_chars_ok"  = false ] && print_info "  FAILED: $clone_dir/sql/battlepass_characters.sql → acore_characters"
+            print_info "Resolve SQL errors, then reconfigure via ALE Scripts menu → c on Battle Pass."
+        fi
     else
         print_warning "Skipping SQL — apply manually when the database is running:"
         print_info "  $clone_dir/sql/battlepass_world.sql      → acore_world"
         print_info "  $clone_dir/sql/battlepass_characters.sql → acore_characters"
     fi
 
-    # Interactive config updates to battlepass_config table
-    if container_running "$DB_CONTAINER"; then
+    # Interactive config — only when world schema exists (config table lives in acore_world)
+    if [ "$_bp_world_ok" = true ] && container_running "$DB_CONTAINER"; then
         echo ""
         print_info "Configure Battle Pass settings (press ENTER to keep defaults):"
         echo ""
@@ -2287,81 +2897,143 @@ configure_ale_battlepass() {
         exp_scaling=${exp_scaling:-1.1}
         npc_entry=${npc_entry:-90100}
         debug_mode=${debug_mode:-0}
-
-        if docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
-            -e "UPDATE battlepass_config SET value='$enabled'       WHERE \`key\`='enabled';
-                UPDATE battlepass_config SET value='$max_level'     WHERE \`key\`='max_level';
-                UPDATE battlepass_config SET value='$exp_per_level' WHERE \`key\`='exp_per_level';
-                UPDATE battlepass_config SET value='$exp_scaling'   WHERE \`key\`='exp_scaling';
-                UPDATE battlepass_config SET value='$npc_entry'     WHERE \`key\`='npc_entry';
-                UPDATE battlepass_config SET value='$debug_mode'    WHERE \`key\`='debug_mode';" \
-            2>/dev/null; then
-            # UPDATE succeeds even when 0 rows match (older schema missing some keys).
-            # Verify all 6 keys are actually present in the table.
-            local found_keys
-            found_keys=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
-                -sN -e "SELECT COUNT(*) FROM battlepass_config WHERE \`key\` IN \
-                        ('enabled','max_level','exp_per_level','exp_scaling','npc_entry','debug_mode');" \
-                2>/dev/null)
-            if [ "${found_keys:-0}" -ge 6 ]; then
-                print_success "Battle Pass config applied (all 6 keys updated)."
+        # Validate inputs before sending to MySQL
+        local _valid=true
+        [[ "$enabled"       =~ ^[01]$                  ]] || { print_warning "Invalid enabled value (must be 0 or 1).";       _valid=false; }
+        [[ "$max_level"     =~ ^[0-9]+$                ]] || { print_warning "Invalid max_level (must be integer).";          _valid=false; }
+        [[ "$exp_per_level" =~ ^[0-9]+$                ]] || { print_warning "Invalid exp_per_level (must be integer).";      _valid=false; }
+        [[ "$exp_scaling"   =~ ^[0-9]+([.][0-9]+)?$   ]] || { print_warning "Invalid exp_scaling (must be number e.g. 1.1)"; _valid=false; }
+        [[ "$npc_entry"     =~ ^[0-9]+$                ]] || { print_warning "Invalid npc_entry (must be integer).";          _valid=false; }
+        [[ "$debug_mode"    =~ ^[01]$                  ]] || { print_warning "Invalid debug_mode (must be 0 or 1).";          _valid=false; }
+        if [ "$_valid" = true ]; then
+            if docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
+                -e "UPDATE battlepass_config SET config_value='$enabled'       WHERE config_key='enabled';
+                    UPDATE battlepass_config SET config_value='$max_level'     WHERE config_key='max_level';
+                    UPDATE battlepass_config SET config_value='$exp_per_level' WHERE config_key='exp_per_level';
+                    UPDATE battlepass_config SET config_value='$exp_scaling'   WHERE config_key='exp_scaling';
+                    UPDATE battlepass_config SET config_value='$npc_entry'     WHERE config_key='npc_entry';
+                    UPDATE battlepass_config SET config_value='$debug_mode'    WHERE config_key='debug_mode';" \
+                2>/dev/null; then
+                local found_keys
+                found_keys=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
+                    -sN -e "SELECT COUNT(*) FROM battlepass_config WHERE config_key IN \
+                            ('enabled','max_level','exp_per_level','exp_scaling','npc_entry','debug_mode');" \
+                    2>/dev/null)
+                if [ "${found_keys:-0}" -ge 6 ]; then
+                    print_success "Battle Pass config applied (all 6 keys updated)."
+                else
+                    print_warning "Only ${found_keys:-0}/6 config keys found in battlepass_config."
+                    print_info "The table may be from an older install. Re-run the SQL files, then reconfigure."
+                fi
             else
-                print_warning "Only ${found_keys:-0}/6 config keys were found in battlepass_config."
-                print_info "The table may be from an older install. Re-run the SQL files, then reconfigure."
+                print_warning "Config update failed — the battlepass_config table may not exist yet."
+                print_info "Run the SQL files above first, then reconfigure via option C."
             fi
         else
-            print_warning "Config update failed — the battlepass_config table may not exist yet."
-            print_info "Run the SQL files above first, then reconfigure via option C."
+            print_info "Config not saved due to invalid input. Reconfigure via ALE Scripts menu → c on Battle Pass."
         fi
     fi
 
     # Client addon
     echo ""
-    print_step "Battle Pass — Client Addon Required"
+    print_step "Battle Pass — Client Addon"
     echo -e "${WHITE}The Battle Pass system includes a WoW client addon for the in-game UI.${RST}"
     echo ""
-    echo -e "${WHITE}${BOLD}Copy this folder to your WoW client's AddOns directory:${RST}"
-    echo -e "  ${CYAN}Source:${RST}      $clone_dir/BattlePass/"
-    echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/BattlePass/"
-    echo ""
-    echo -e "${WHITE}Use ${CYAN}/bp${WHITE} or ${CYAN}/battlepass${WHITE} in the WoW chat to open the Battle Pass frame.${RST}"
+    if ask_yes_no "Auto-install BattlePass addon to WoW client now?"; then
+        copy_client_addon "$clone_dir/BattlePass" "BattlePass" "BattlePass addon"
+    else
+        print_info "Manual: cp -r \"$clone_dir/BattlePass\" <WoW>/Interface/AddOns/BattlePass"
+    fi
+    echo -e "${WHITE}Use ${CYAN}/bp${WHITE} or ${CYAN}/battlepass${WHITE} in WoW chat to open the Battle Pass frame.${RST}"
     echo -e "${WHITE}Server commands: ${CYAN}.bp${WHITE} | ${CYAN}.bp rewards${WHITE} | ${CYAN}.bp claim <level>${WHITE} | ${CYAN}.bp claimall${RST}"
     echo -e "${WHITE}Admin commands:  ${CYAN}.bpadmin addxp${WHITE} | ${CYAN}.bpadmin setlevel${WHITE} | ${CYAN}.bpadmin reset${WHITE} | ${CYAN}.bpadmin reload${RST}"
+    # Ensure the NPC creature_template entry exists regardless of whether world SQL succeeded
+    echo ""
+    fix_battlepass_npc
 }
 
 configure_ale_paragon() {
     local clone_dir
     clone_dir=$(ale_script_clone_dir "paragon")
+    local paragon_sql_dir="$clone_dir/sql"
 
     print_step "Paragon Anniversary — SQL Migrations Required"
     echo ""
-    echo -e "${WHITE}Paragon Anniversary requires SQL files to be applied BEFORE first startup.${RST}"
-    echo -e "${WHITE}Tables are NOT auto-created — you must run these migrations manually.${RST}"
+    echo -e "${WHITE}Paragon Anniversary requires SQL files applied BEFORE first startup.${RST}"
+    echo -e "${WHITE}Tables are NOT auto-created — you must run these migrations.${RST}"
     echo ""
     if ensure_db_running; then
-        local paragon_sql_dir="$clone_dir/sql"
-        local sql_files
-        sql_files=$(find "$paragon_sql_dir" -name "*.sql" 2>/dev/null | sort)
-        if [ -n "$sql_files" ]; then
-            print_info "Found SQL files in $paragon_sql_dir:"
-            echo "$sql_files" | while read -r f; do echo "    - $(basename "$f")"; done
+        # Collect schema migration files (numbered 0x_*.sql); exclude example/data files
+        local -a schema_files=()
+        local f
+        while IFS= read -r f; do
+            local bn; bn=$(basename "$f")
+            # Skip date-prefixed example data files (e.g. 11-13-2026_Example_Data.sql)
+            if [[ "$bn" =~ ^[0-9]{2}-[0-9]{2} ]] || [[ "$bn" =~ [Ee]xample ]]; then
+                continue
+            fi
+            schema_files+=("$f")
+        done < <(find "$paragon_sql_dir" -name "*.sql" 2>/dev/null | sort)
+
+        if [ "${#schema_files[@]}" -gt 0 ]; then
+            print_info "Schema migration files (in order):"
+            for f in "${schema_files[@]}"; do echo "    - $(basename "$f")"; done
             echo ""
-            if ask_yes_no "Apply all Paragon SQL files to acore_world now?"; then
-                echo "$sql_files" | while read -r f; do
-                    ale_run_sql_file "acore_world" "$f"
-                done
+            if ask_yes_no "Apply Paragon schema migrations now?"; then
+                local _paragon_schema_ok=true
+                # 01_create_database.sql creates the acore_ale DB — run via acore_world
+                local db_create="$paragon_sql_dir/01_create_database.sql"
+                if [ -f "$db_create" ]; then
+                    if ! ale_run_sql_file "acore_world" "$db_create"; then
+                        print_warning "Database creation failed — aborting remaining migrations."
+                        _paragon_schema_ok=false
+                    fi
+                fi
+                # Remaining migrations run against acore_ale (only if 01 succeeded)
+                if [ "$_paragon_schema_ok" = true ]; then
+                    for f in "${schema_files[@]}"; do
+                        [[ "$(basename "$f")" == "01_create_database.sql" ]] && continue
+                        if ! ale_run_sql_file "acore_ale" "$f"; then
+                            print_warning "Migration failed — aborting remaining migrations."
+                            _paragon_schema_ok=false
+                            break
+                        fi
+                    done
+                fi
             else
-                print_warning "Apply SQL manually before starting the server:"
-                echo "$sql_files" | while read -r f; do
-                    print_info "  mysql acore_world < $f"
+                local _paragon_schema_ok=false
+                print_warning "Apply migrations manually before starting the server:"
+                print_info "  mysql acore_world < $paragon_sql_dir/01_create_database.sql"
+                for f in "${schema_files[@]}"; do
+                    [[ "$(basename "$f")" == "01_create_database.sql" ]] && continue
+                    print_info "  mysql acore_ale   < $f"
                 done
             fi
+            # Offer example/sample data only if schema migrations succeeded
+            if [ "${_paragon_schema_ok:-false}" = true ]; then
+                local example_file
+                example_file=$(find "$paragon_sql_dir" -name "*.sql" 2>/dev/null \
+                    | grep -E '[0-9]{2}-[0-9]{2}|[Ee]xample' | sort | head -1)
+                if [ -n "$example_file" ]; then
+                    echo ""
+                    print_info "Optional example data: $(basename "$example_file")"
+                    if ask_yes_no "Apply example data to acore_ale? (optional — safe to skip)"; then
+                        ale_run_sql_file "acore_ale" "$example_file"
+                    fi
+                fi
+            fi
         else
-            print_warning "No SQL files found in $paragon_sql_dir"
+            print_warning "No schema SQL files found in $paragon_sql_dir"
             print_info "Check the repo's sql/ directory and apply required migrations."
         fi
     else
-        print_warning "Database not available. Apply SQL files from $clone_dir/sql/ manually."
+        print_warning "Database not available. Apply SQL files manually:"
+        print_info "  mysql acore_world < $paragon_sql_dir/01_create_database.sql"
+        print_info "  mysql acore_ale   < $paragon_sql_dir/02_create_config_tables.sql"
+        print_info "  mysql acore_ale   < $paragon_sql_dir/03_create_experience_tables.sql"
+        print_info "  mysql acore_ale   < $paragon_sql_dir/04_create_paragon_tables.sql"
+        print_info "  mysql acore_ale   < $paragon_sql_dir/05_create_triggers.sql"
+        print_info "  mysql acore_ale   < $paragon_sql_dir/06_insert_default_config.sql"
     fi
 
     echo ""
@@ -2377,16 +3049,18 @@ configure_ale_paragon() {
     echo ""
     echo -e "${DIM}Full install guide: $clone_dir/doc/INSTALL.md${RST}"
 
-    # Client addon
+    # Client files — Paragon ships a full Interface/ subtree, not just an AddOn
     echo ""
-    print_step "Paragon Anniversary — Client Addon Required"
-    echo -e "${WHITE}Paragon includes a WoW client addon for the in-game progression UI.${RST}"
+    print_step "Paragon Anniversary — Client Files"
+    echo -e "${WHITE}Paragon ships custom Interface files for the in-game progression UI.${RST}"
+    echo -e "${DIM}These are merged into your WoW client's Interface/ directory.${RST}"
     echo ""
-    echo -e "${WHITE}${BOLD}Find the addon folder in the cloned repo and copy it to AddOns:${RST}"
-    echo -e "  ${CYAN}Look in:${RST}     $clone_dir/"
-    echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/ParagonAnniversary/"
-    echo ""
-    echo -e "${DIM}The addon communicates with the server via the ParagonAnniversary protocol.${RST}"
+    if ask_yes_no "Auto-install Paragon client files to WoW Interface now?"; then
+        copy_client_interface "$clone_dir/clientside/Interface" "Paragon client files"
+    else
+        print_info "Manual: cp -r \"$clone_dir/clientside/Interface/.\" <WoW>/Interface/"
+    fi
+    echo -e "${DIM}Full install guide: $clone_dir/doc/INSTALL.md${RST}"
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -2542,201 +3216,55 @@ configure_ale_bmah() {
     clone_dir=$(ale_script_clone_dir "bmah")
     local lua_dir
     lua_dir=$(ale_lua_scripts_dir)
-    local deployed_file="$lua_dir/bmah_server.lua"
+    local deployed_file="$lua_dir/BMAH.lua"
 
-    # Parallel arrays — index-aligned (Bash 3 compatible; no associative arrays).
-    local -a BNPC_IDS=(   2494              7164    )
-    local -a BNPC_NAMES=( "Privateer Bloads" "Krazek" )
-
-
-    print_step "Black Market AH — NPC Vendor Configuration"
-    echo ""
-    echo -e "${WHITE}The BMAH opens when a player interacts with any gossip-enabled NPC whose${RST}"
-    echo -e "${WHITE}entry ID is listed in ${CYAN}BMAH_VENDOR_NPCs${WHITE} inside bmah_server.lua.${RST}"
+    print_step "Black Market AH — Configuration"
     echo ""
 
+    # ── Re-deploy base file to pick up latest fixes ──────────
+    local _base_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/BMAH.lua"
+    if [ -f "$_base_src" ]; then
+        cp "$_base_src" "$deployed_file" && \
+            print_success "Re-deployed base BMAH.lua (latest fixes applied)." || \
+            print_warning "Could not re-deploy base file — working with existing deployed copy."
+    fi
     # ── Missing file guard ────────────────────────────────────
     if [ ! -f "$deployed_file" ]; then
-        print_warning "bmah_server.lua not found at:"
+        print_warning "BMAH.lua not found at:"
         print_info "  $deployed_file"
         print_info "Deploy the script first (install from the ALE Scripts menu), then reconfigure."
         echo ""
-        print_step "Black Market AH — Client Addon Required"
+        print_step "Black Market AH — Client Addon"
         echo -e "${WHITE}BMAH includes a WoW addon that recreates the Mists of Pandaria BMAH UI.${RST}"
         echo ""
-        echo -e "${WHITE}${BOLD}Copy this folder to your WoW client's AddOns directory:${RST}"
-        echo -e "  ${CYAN}Source:${RST}      $clone_dir/BlackMarketUI/"
-        echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/BlackMarketUI/"
-        echo ""
-        echo -e "${WHITE}After copying, run ${CYAN}/reload${WHITE} or restart the WoW client.${RST}"
+        if ask_yes_no "Auto-install BlackMarketUI addon to WoW client now?"; then
+            copy_client_addon "$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/Client Files/AddOns/BlackMarketUI" "BlackMarketUI" "BlackMarketUI addon"
+        else
+            print_info "Manual: cp -r \"$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/Client Files/AddOns/BlackMarketUI\" <WoW>/Interface/AddOns/BlackMarketUI"
+        fi
         return 1
     fi
 
-    # ── Show current IDs extracted from the file ──────────────
-    local current_ids
-    current_ids=$(awk '
-        /^[[:space:]]*local BMAH_VENDOR_NPCs[[:space:]]*=/ { found=1 }
-        found {
-            tmp = $0
-            gsub(/--[^\n]*/, "", tmp)   # strip line comments
-            while (match(tmp, /[0-9]+/)) {
-                print substr(tmp, RSTART, RLENGTH)
-                tmp = substr(tmp, RSTART + RLENGTH)
-            }
-        }
-        found && /\}/ { exit }
-    ' "$deployed_file" | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//')
-
-    if [ -n "$current_ids" ]; then
-        echo -e "${WHITE}Currently configured NPC IDs:${RST} ${CYAN}${current_ids}${RST}"
-        echo ""
+    # ── Re-apply BMAH_Up.sql to ensure NPC model is correct ──
+    local _bmah_sql="$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/sql/BMAH_Up.sql"
+    if [ -f "$_bmah_sql" ] && container_running "$DB_CONTAINER"; then
+        print_info "Re-applying BMAH_Up.sql (fixes NPC model)..."
+        docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
+            < "$_bmah_sql" 2>/dev/null && \
+            print_success "BMAH SQL applied — NPC model set." || \
+            print_warning "BMAH SQL apply failed — check DB container logs."
     fi
 
-    # ── NPC selection menu ────────────────────────────────────
-    echo -e "  ${GOLD}──  Suggested Vendor NPCs (Booty Bay)  ─────────────────────────────────${RST}"
+    # ── Spawn instructions ────────────────────────────────────
     echo ""
-    printf "  ${WHITE}%2s)${RST} %-22s ${CYAN}(%5s)${RST}  %s\n" \
-        1 "Privateer Bloads" 2494 "Booty Bay; shady privateer with underworld connections" \
-        2 "Krazek"           7164 "Booty Bay goblin; deals in rare and illicit goods"
-    echo ""
-    echo -e "  ${GOLD}────────────────────────────────────────────────────────────────────────${RST}"
-    echo ""
-    printf "${WHITE}Select NPCs by number (e.g. 1 2), or \"all\". Leave blank to keep current IDs: ${RST}"
-    read -r _bsel
-
-    # ── Parse numbered selection ──────────────────────────────
-    local -a sel_ids=()
-    local -a sel_names=()
-
-    local _bsel_lower
-    _bsel_lower=$(printf '%s' "$_bsel" | tr '[:upper:]' '[:lower:]')
-    if [ "$_bsel_lower" = "all" ]; then
-        sel_ids=("${BNPC_IDS[@]}")
-        sel_names=("${BNPC_NAMES[@]}")
-    elif [ -n "$_bsel" ]; then
-        local tok
-        for tok in $_bsel; do
-            if [[ "$tok" =~ ^[0-9]+$ ]] && \
-                [ "$tok" -ge 1 ] && [ "$tok" -le "${#BNPC_IDS[@]}" ]; then
-                sel_ids+=("${BNPC_IDS[$((tok - 1))]}")
-                sel_names+=("${BNPC_NAMES[$((tok - 1))]}")
-            else
-                print_warning "  Skipping invalid selection: $tok (valid range: 1-${#BNPC_IDS[@]})"
-            fi
-        done
-    fi
-
-    # ── Optional extra custom NPC ID ─────────────────────────
-    echo ""
-    printf "${WHITE}Add a custom NPC entry ID? (leave blank to skip): ${RST}"
-    read -r _bcustom
-    if [[ "$_bcustom" =~ ^[0-9]+$ ]]; then
-        sel_ids+=("$_bcustom")
-        sel_names+=("Custom NPC")
-    elif [ -n "$_bcustom" ]; then
-        print_warning "  '$_bcustom' is not a valid numeric entry ID — skipping."
-    fi
-
-    # ── Decide add vs replace ─────────────────────────────────
-    local _bmode="add"
-    if [ "${#sel_ids[@]}" -gt 0 ] && [ -n "$current_ids" ]; then
-        echo ""
-        printf "${WHITE}Apply as: [a] Add to existing list  [r] Replace list entirely [a]: ${RST}"
-        read -r _bmode_raw
-        case "$_bmode_raw" in [Rr]) _bmode="replace" ;; esac
-    fi
-
-    # ── Build final deduped ID list ───────────────────────────
-    local -a final_ids=()
-
-    if [ "$_bmode" = "add" ] && [ -n "$current_ids" ]; then
-        local id
-        for id in $current_ids; do
-            [[ "$id" =~ ^[0-9]+$ ]] && final_ids+=("$id")
-        done
-    fi
-
-    local i
-    for (( i=0; i<${#sel_ids[@]}; i++ )); do
-        local sid="${sel_ids[$i]}"
-        if ! _bmah_in_list "$sid" "${final_ids[@]}"; then
-            final_ids+=("$sid")
-        fi
-    done
-
-    # ── Patch the file (or skip if nothing to change) ─────────
-    if [ "${#final_ids[@]}" -eq 0 ] && [ -z "$_bsel" ] && [ -z "$_bcustom" ]; then
-        print_info "No changes to NPC list."
-    elif [ "${#final_ids[@]}" -eq 0 ]; then
-        print_warning "Resulting NPC list is empty — skipping file patch."
-        print_info "Add at least one NPC ID, or edit ${deployed_file} manually."
-    else
-        # Write one NPC entry per line to a temp file; awk reads it with
-        # getline so embedded newlines never hit the -v variable limit.
-        local ids_file tmpfile j label
-        ids_file=$(mktemp "${TMPDIR:-/tmp}/bmah_ids_XXXXXX") || {
-            print_error "Could not create temp file — aborting NPC patch."
-            return 1
-        }
-        tmpfile=$(mktemp "${TMPDIR:-/tmp}/bmah_server_XXXXXX.lua") || {
-            rm -f "$ids_file"
-            print_error "Could not create temp file — aborting NPC patch."
-            return 1
-        }
-        for id in "${final_ids[@]}"; do
-            printf "  %s,\n" "$id" >> "$ids_file"
-        done
-
-        # awk replaces the BMAH_VENDOR_NPCs block — handles both inline and
-        # multiline forms.  Anchored to line-start so a commented-out example
-        # line cannot trigger the replacement.  Exits 1 if the pattern was
-        # never matched so we detect a failed patch before overwriting the file.
-        awk -v ids_file="$ids_file" '
-            /^[[:space:]]*local BMAH_VENDOR_NPCs[[:space:]]*=/ {
-                print "local BMAH_VENDOR_NPCs = {"
-                while ((getline line < ids_file) > 0) { print line }
-                close(ids_file)
-                replaced++
-                if (/\}/) { print "}"; next }   # inline closing brace on same line
-                skip = 1
-                next
-            }
-            skip {
-                if (/^[[:space:]]*\}/) { print "}"; skip = 0 }
-                next
-            }
-            { print }
-            END { if (replaced == 0) exit 1 }
-        ' "$deployed_file" > "$tmpfile"
-        local awk_rc=$?
-        rm -f "$ids_file"
-
-        if [ $awk_rc -eq 0 ] && [ -s "$tmpfile" ]; then
-            if mv "$tmpfile" "$deployed_file"; then
-                echo ""
-                print_success "BMAH_VENDOR_NPCs updated with ${#final_ids[@]} NPC(s):"
-                for id in "${final_ids[@]}"; do
-                    label=""
-                    for (( j=0; j<${#BNPC_IDS[@]}; j++ )); do
-                        [ "${BNPC_IDS[$j]}" = "$id" ] && label=" — ${BNPC_NAMES[$j]}" && break
-                    done
-                    print_info "  • ${id}${label}"
-                done
-            else
-                rm -f "$tmpfile"
-                print_error "Could not write updated file — check permissions on: $deployed_file"
-            fi
-        else
-            rm -f "$tmpfile"
-            print_error "Could not locate BMAH_VENDOR_NPCs block in bmah_server.lua."
-            print_info "Edit manually: $deployed_file"
-            print_info "Look for: local BMAH_VENDOR_NPCs = { ... } and add your IDs."
-        fi
-    fi
+    print_step "Black Market AH — Spawn the Broker NPC"
+    echo -e "${WHITE}The BMAH broker NPC (entry 2069430) must be placed in the world.${RST}"
+    _offer_npc_in_capitals 2069430 "Black Market Broker" \
+        "Run after restarting the worldserver."
 
     # ── Pricing & timing reference ────────────────────────────
     echo ""
-    echo -e "${WHITE}Other configurable values (edit directly in bmah_server.lua):${RST}"
+    echo -e "${WHITE}Other configurable values (edit directly in BMAH.lua):${RST}"
     echo ""
     printf "  ${CYAN}%-32s${RST} ${WHITE}%s${RST}\n" \
         "common/rare/ultraRare_*_price"  "Starting bids per item category and tier" \
@@ -2749,14 +3277,15 @@ configure_ale_bmah() {
 
     # ── Client addon ─────────────────────────────────────────
     echo ""
-    print_step "Black Market AH — Client Addon Required"
+    print_step "Black Market AH — Client Addon"
     echo -e "${WHITE}BMAH includes a WoW addon that recreates the Mists of Pandaria BMAH UI.${RST}"
     echo ""
-    echo -e "${WHITE}${BOLD}Copy this folder to your WoW client's AddOns directory:${RST}"
-    echo -e "  ${CYAN}Source:${RST}      $clone_dir/BlackMarketUI/"
-    echo -e "  ${CYAN}Destination:${RST} <WoW_Client>/Interface/AddOns/BlackMarketUI/"
-    echo ""
-    echo -e "${WHITE}After copying, run ${CYAN}/reload${WHITE} or restart the WoW client.${RST}"
+    if ask_yes_no "Auto-install BlackMarketUI addon to WoW client now?"; then
+        copy_client_addon "$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/Client Files/AddOns/BlackMarketUI" "BlackMarketUI" "BlackMarketUI addon"
+    else
+        print_info "Manual: cp -r \"$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/Client Files/AddOns/BlackMarketUI\" <WoW>/Interface/AddOns/BlackMarketUI"
+    fi
+    echo -e "${WHITE}After installing, run ${CYAN}/reload${WHITE} or restart the WoW client.${RST}"
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -2986,6 +3515,40 @@ configure_ale_accountwide() {
     print_info "Restart the worldserver or run ${CYAN}.reload ale${RST} in-game to activate changes."
 }
 
+configure_ale_activechat() {
+    local lua_dir clone_dir _ac_dest
+    lua_dir=$(ale_lua_scripts_dir)
+    clone_dir=$(ale_script_clone_dir "activechat")
+    _ac_dest="$lua_dir/AzerothChatter"
+    print_step "Configuring Azeroth Chatter"
+    if [ ! -d "$_ac_dest" ]; then
+        print_error "AzerothChatter not yet deployed — install it first (i<num> in ALE Scripts menu)."
+        return 1
+    fi
+    # Re-copy from clone if available
+    if [ -d "$clone_dir/AzerothChatter" ]; then
+        cp -r "$clone_dir/AzerothChatter"/. "$_ac_dest/"
+        print_success "Re-synced from clone."
+    fi
+    # Fix duplicate-basename collision: ALE detects dupes by basename across all subdirs.
+    # data/chatter.lua clashes with logic/chatter.lua; same for context.lua.
+    local _fixed=false
+    [ -f "$_ac_dest/data/chatter.lua" ] && mv "$_ac_dest/data/chatter.lua" "$_ac_dest/data/chatter_data.lua" && _fixed=true
+    [ -f "$_ac_dest/data/context.lua" ] && mv "$_ac_dest/data/context.lua" "$_ac_dest/data/context_data.lua" && _fixed=true
+    if $_fixed; then
+        find "$_ac_dest" -name "*.lua" -exec \
+            sed -i '' \
+                -e 's/require("data\.chatter")/require("data.chatter_data")/g' \
+                -e "s/require('data\.chatter')/require('data.chatter_data')/g" \
+                -e 's/require("data\.context")/require("data.context_data")/g' \
+                -e "s/require('data\.context')/require('data.context_data')/g" \
+            {} \;
+        print_success "Duplicate filename collision fixed (data/chatter→chatter_data, data/context→context_data)."
+    else
+        print_info "No duplicate files found — already fixed or not present."
+    fi
+    print_info "Run ${CYAN}.reload ale${RST} in-game to apply."
+}
 # ── Lua file deployment (per-script copy strategy) ───────────
 # Each script has its own repo layout; this handles the mapping.
 ale_deploy_lua_files() {
@@ -3017,33 +3580,49 @@ ale_deploy_lua_files() {
                 print_warning "No .lua files found in clone root — check $clone_dir"
             fi
             ;;
-        exchangenpc)
-            local count=0
-            if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
-                count=$(ls "$clone_dir"/*.lua 2>/dev/null | wc -l | tr -d ' ')
-                print_success "Deployed $count file(s) → lua_scripts/"
-            else
-                print_warning "No .lua files found in clone root — check $clone_dir"
-            fi
-            ;;
         activechat)
-            # Upstream layout: ActiveChat/ subdirectory
-            local src="$clone_dir/ActiveChat"
+            # Upstream layout: AzerothChatter/ subdirectory
+            # ALE detects duplicate basenames across subdirs — data/chatter.lua vs logic/chatter.lua
+            # and data/context.lua vs logic/context.lua both collide. Fix: rename data/ files and
+            # patch require("data.chatter") → require("data.chatter_data") etc. after copy.
+            local src="$clone_dir/AzerothChatter"
             if [ -d "$src" ]; then
-                mkdir -p "$lua_dir/activechat"
-                cp -r "$src"/. "$lua_dir/activechat/" && \
-                    print_success "Deployed → lua_scripts/activechat/" || \
-                    print_warning "Copy failed — check $src"
+                mkdir -p "$lua_dir/AzerothChatter"
+                cp -r "$src"/. "$lua_dir/AzerothChatter/"
+                local _ac_dest="$lua_dir/AzerothChatter"
+                # Rename conflicting data/ files
+                [ -f "$_ac_dest/data/chatter.lua"  ] && mv "$_ac_dest/data/chatter.lua"  "$_ac_dest/data/chatter_data.lua"
+                [ -f "$_ac_dest/data/context.lua"  ] && mv "$_ac_dest/data/context.lua"  "$_ac_dest/data/context_data.lua"
+                # Patch all require("data.chatter") / require("data.context") references
+                find "$_ac_dest" -name "*.lua" -exec \
+                    sed -i '' \
+                        -e 's/require("data\.chatter")/require("data.chatter_data")/g' \
+                        -e "s/require('data\.chatter')/require('data.chatter_data')/g" \
+                        -e 's/require("data\.context")/require("data.context_data")/g' \
+                        -e "s/require('data\.context')/require('data.context_data')/g" \
+                    {} \;
+                print_success "Deployed → lua_scripts/AzerothChatter/ (duplicate filenames resolved)"
             else
                 print_warning "Expected directory not found: $src"
-                print_info "Manually copy ActiveChat/ contents to: $lua_dir/activechat/"
+                print_info "Manually copy AzerothChatter/ contents to: $lua_dir/AzerothChatter/"
             fi
             ;;
         battlepass)
             if [ -d "$clone_dir/lua_scripts" ]; then
                 cp -r "$clone_dir/lua_scripts/." "$lua_dir/" && \
-                    print_success "Deployed → lua_scripts/ (lib/CSMH + battlepass/)" || \
-                    print_warning "Copy failed — check $clone_dir/lua_scripts"
+                    print_success "Deployed → lua_scripts/ (battlepass/ + lib/CSMH)" || \
+                    { print_warning "Copy failed — check $clone_dir/lua_scripts"; break; }
+                # ALE auto-loads all .ext files BEFORE any .lua scripts run.
+                # So by the time 05_BP_Communication.lua executes, RegisterClientRequests
+                # and Player:SendServerResponse are already defined by CSMH_SMH.ext.
+                # The require("lib.CSMH.CSMH_SMH") call in the upstream file causes
+                # double-loading which corrupts CSMH's internal state and crashes the server.
+                # Fix: remove the redundant require so CSMH loads exactly once.
+                local _comm="$lua_dir/battlepass/05_BP_Communication.lua"
+                if [ -f "$_comm" ]; then
+                    sed -i 's|^require("lib\.CSMH\.CSMH_SMH")|-- require removed: CSMH_SMH.ext is auto-loaded by ALE before .lua scripts run|' "$_comm"
+                    print_success "Patched 05_BP_Communication.lua — removed duplicate require (double-load fix)"
+                fi
             else
                 print_warning "lua_scripts/ dir not found in clone — check $clone_dir manually."
             fi
@@ -3061,15 +3640,15 @@ ale_deploy_lua_files() {
             fi
             ;;
         bmah)
-            # Upstream layout: Server Files/lua_scripts/bmah_server.lua
-            local src="$clone_dir/Server Files/lua_scripts/bmah_server.lua"
+            # ALE-Kegs fork: BMAH.lua lives at the root of BlackMarketAuctionHouse/
+            local src="$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/BMAH.lua"
             if [ -f "$src" ]; then
                 cp "$src" "$lua_dir/" && \
-                    print_success "Deployed bmah_server.lua → lua_scripts/" || \
+                    print_success "Deployed BMAH.lua → lua_scripts/" || \
                     print_warning "Copy failed — check '$src'"
             else
                 print_warning "Expected file not found: $src"
-                print_info "Manually copy bmah_server.lua to: $lua_dir/"
+                print_info "Manually copy BMAH.lua to: $lua_dir/"
             fi
             ;;
         lootpet)
@@ -3082,12 +3661,19 @@ ale_deploy_lua_files() {
             fi
             ;;
         sod)
-            local count=0
-            if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
-                count=$(ls "$clone_dir"/*.lua 2>/dev/null | wc -l | tr -d ' ')
-                print_success "Deployed $count file(s) → lua_scripts/"
+            # Script lives in a subdirectory of the dads-mmo-lab repo
+            local sod_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/SeasonOfDiscovery/SOD.lua"
+            if [ -f "$sod_src" ]; then
+                cp "$sod_src" "$lua_dir/" && \
+                    print_success "Deployed SOD.lua → lua_scripts/" || \
+                    print_warning "Copy failed — check $sod_src"
+                # Remove stale sub-directory copy that causes duplicate-load error
+                if [ -f "$lua_dir/sod/SOD.lua" ]; then
+                    rm -f "$lua_dir/sod/SOD.lua" && \
+                        print_info "Removed stale lua_scripts/sod/SOD.lua (duplicate)"
+                fi
             else
-                print_warning "No .lua files found in clone root — check $clone_dir"
+                print_warning "SOD.lua not found at expected path: $sod_src"
             fi
             ;;
         sitmeanrest)
@@ -3120,16 +3706,59 @@ ale_deploy_lua_files() {
 
 # Clone/update, deploy Lua files, run per-script extras.
 ale_script_install() {
-    local key="$1" name="$2" url="$3"
+    local key="$1" name="$2" url="$3" branch="${4:-HEAD}"
     local clone_dir
     clone_dir=$(ale_script_clone_dir "$key")
 
     print_step "Installing ALE script: $name"
 
     mkdir -p "$SERVER_DIR/ale_scripts"
-    if ale_script_is_installed "$key"; then
+
+    # For scripts sourced from a subfolder of dads-mmo-lab, check for the
+    # actual source file rather than relying on .git presence.
+    local _dml_src=""
+    case "$key" in
+        sod)         _dml_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/SeasonOfDiscovery/SOD.lua" ;;
+        bmah)        _dml_src="$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/BMAH.lua" ;;
+    esac
+
+    if [ -n "$_dml_src" ]; then
+        # dads-mmo-lab subfolder script
+        if [ -f "$_dml_src" ]; then
+            print_info "Staged files found — updating from remote if possible..."
+            if [ -d "$clone_dir/.git" ]; then
+                git -C "$clone_dir" pull --depth=1 origin "$branch" --quiet 2>/dev/null || \
+                    print_warning "git pull failed — using existing staged files"
+            fi
+        else
+            # No files yet — sparse clone
+            [ -d "$clone_dir" ] && rm -rf "$clone_dir"
+            local _sparse_path
+            case "$key" in
+                sod)         _sparse_path="guides/wow-wotlk/ALE-Kegs/SeasonOfDiscovery" ;;
+                bmah)        _sparse_path="guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse" ;;
+            esac
+            mkdir -p "$clone_dir"
+            if ! git -C "$clone_dir" init -q || \
+               ! git -C "$clone_dir" remote add origin "$url"; then
+                rm -rf "$clone_dir"
+                print_error "Clone init failed for $name!"
+                return 1
+            fi
+            git -C "$clone_dir" config core.sparseCheckout true
+            mkdir -p "$clone_dir/.git/info"
+            printf '%s/\n' "$_sparse_path" > "$clone_dir/.git/info/sparse-checkout"
+            if ! git -C "$clone_dir" pull --depth=1 origin "$branch" --quiet; then
+                rm -rf "$clone_dir"
+                print_error "Sparse fetch failed for $name!"
+                print_info "Ensure the files have been pushed to: $url"
+                return 1
+            fi
+            print_success "Fetched $name"
+        fi
+    elif ale_script_is_installed "$key"; then
         print_info "Already cloned — pulling latest..."
-        (cd "$clone_dir" && git pull --depth 1 2>/dev/null) || \
+        (cd "$clone_dir" && git pull --depth=1 origin "$branch" --quiet 2>/dev/null) || \
             print_warning "git pull failed — using existing copy"
     else
         if [ -d "$clone_dir" ] && [ ! -d "$clone_dir/.git" ]; then
@@ -3154,22 +3783,20 @@ ale_script_install() {
             print_info "00_AccountWideUtils.lua is required alongside all other Accountwide"
             print_info "scripts — it has been deployed with the rest in lua_scripts/accountwide/."
             echo ""
-            print_info "Accountwide requires a characters DB schema."
-            if ask_yes_no "Apply Accountwide characters SQL now?"; then
+            print_warning "Accountwide REQUIRES a characters DB schema — the system will not work without it."
+            if ask_yes_no "Apply Accountwide characters SQL now? (required)"; then
+                local sql_file="$clone_dir/sql/create_accountwide_tables.sql"
                 if ensure_db_running; then
-                    local sql_file="$clone_dir/sql/create_accountwide_tables.sql"
                     if [ -f "$sql_file" ]; then
                         ale_run_sql_file "acore_characters" "$sql_file"
                     else
-                        # Fallback: search for the file if name changed upstream
-                        local found
-                        found=$(find "$clone_dir/sql" -name "*.sql" 2>/dev/null | head -1)
-                        if [ -n "$found" ]; then
-                            ale_run_sql_file "acore_characters" "$found"
-                        else
-                            print_warning "SQL file not found in $clone_dir/sql/"
-                        fi
+                        print_warning "Expected SQL file not found: $sql_file"
+                        print_info "Locate create_accountwide_tables.sql in $clone_dir/sql/ and apply manually:"
+                        print_info "  mysql acore_characters < <path/to/create_accountwide_tables.sql>"
                     fi
+                else
+                    print_warning "Database not available. Apply SQL manually when DB is running:"
+                    print_info "  mysql acore_characters < $sql_file"
                 fi
             else
                 print_info "Apply manually: mysql acore_characters < $clone_dir/sql/create_accountwide_tables.sql"
@@ -3181,49 +3808,18 @@ ale_script_install() {
                 print_info "Reconfigure anytime from the ALE Scripts menu → c on Accountwide."
             fi
             ;;
-        exchangenpc)
-            echo ""
-            print_info "Exchange NPC requires a world SQL file to be applied."
-            local _exchangenpc_sql_ok=false
-            if ask_yes_no "Apply Exchange NPC world SQL now?"; then
-                if ensure_db_running; then
-                    # Prefer the *_Up.sql (install) variant; avoid Down/Revert scripts
-                    local sql_file
-                    sql_file=$(find "$clone_dir" -name "*_Up.sql" 2>/dev/null | head -1)
-                    if [ -z "$sql_file" ]; then
-                        # Fallback: any SQL that isn't a rollback
-                        sql_file=$(find "$clone_dir" -name "*.sql" 2>/dev/null \
-                            | grep -v -i "down\|revert" | head -1)
-                    fi
-                    if [ -n "$sql_file" ]; then
-                        if ale_run_sql_file "acore_world" "$sql_file"; then
-                            _exchangenpc_sql_ok=true
-                        fi
-                    else
-                        print_warning "No install SQL file found in $clone_dir"
-                        print_info "Manually apply the *_Up.sql file from the repo."
-                    fi
-                fi
-            fi
-            echo ""
-            print_info "Exchange NPC (Roboto, entry 1116001) is in the database but has no spawn point."
-            if [ "$_exchangenpc_sql_ok" = true ]; then
-                _offer_npc_in_capitals 1116001 "Roboto (Exchange NPC)" \
-                    "The NPC template was just applied — restart the server, then run these commands."
-            else
-                print_info "Apply the world SQL first (re-install or run manually), then spawn the NPC:"
-                print_info "  In-game:  ${CYAN}.npc add 1116001 0 -8831.3 628.2 94.1 3.7${RST}  (Stormwind)"
-                print_info "  In-game:  ${CYAN}.npc add 1116001 1  1597.2 -4415.7 17.5 4.5${RST}  (Orgrimmar)"
-            fi
-            ;;
         battlepass)
             echo ""
-            if ask_yes_no "Configure Battle Pass SQL and settings now?"; then
+            print_warning "Battle Pass requires SQL applied before the server starts — tables must exist."
+            if ask_yes_no "Apply Battle Pass SQL and configure settings now?"; then
                 configure_ale_battlepass
             else
-                print_info "Run main menu option 5 (Configure ALE) to reconfigure Battle Pass later."
-                print_info "Remember to apply SQL manually from:"
-                print_info "  $clone_dir/sql/"
+                print_warning "SQL not applied. Apply manually before running the server:"
+                print_info "  acore_world:      $clone_dir/sql/battlepass_world.sql"
+                print_info "  acore_characters: $clone_dir/sql/battlepass_characters.sql"
+                print_info "Reconfigure anytime from the ALE Scripts menu → c on Battle Pass."
+                echo ""
+                fix_battlepass_npc
             fi
             echo ""
             print_info "Battle Pass Ticker (entry 90100) needs to be placed in the world."
@@ -3232,19 +3828,96 @@ ale_script_install() {
             ;;
         paragon)
             echo ""
-            if ask_yes_no "Show Paragon Anniversary configuration guide now?"; then
+            print_warning "Paragon Anniversary requires SQL migrations before first use — server will crash without them."
+            if ask_yes_no "Apply Paragon SQL migrations and view configuration guide now?"; then
                 configure_ale_paragon
+            else
+                print_warning "SQL not applied. Paragon will not function until these files are run:"
+                print_info "  Apply all .sql files (in order) from: $clone_dir/sql/"
+                print_info "  Note: 01_create_database.sql creates the acore_ale database."
+                print_info "Reconfigure anytime from the ALE Scripts menu → c on Paragon."
+            fi
+            echo ""
+            print_step "Paragon Anniversary — Client Files"
+            echo -e "${WHITE}Paragon ships custom Interface files for the in-game progression UI.${RST}"
+            if ask_yes_no "Auto-install Paragon client files to WoW Interface now?"; then
+                copy_client_interface "$clone_dir/clientside/Interface" "Paragon client files"
+            else
+                print_info "Manual: cp -r \"$clone_dir/clientside/Interface/.\" <WoW>/Interface/"
             fi
             ;;
         bmah)
             echo ""
-            if ask_yes_no "Configure Black Market AH (NPC ID + client addon info) now?"; then
+            # Apply world SQL (creates creature_template, model, and npc_text entries)
+            local _bmah_sql="$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/sql/BMAH_Up.sql"
+            if [ -f "$_bmah_sql" ]; then
+                print_step "BMAH — Applying NPC setup SQL (acore_world)..."
+                if ale_run_sql_file "acore_world" "$_bmah_sql"; then
+                    print_success "BMAH NPC (entry 2069430) created/updated in acore_world."
+                    echo ""
+                    print_warning "⚠  The worldserver MUST be restarted for the new creature template to load."
+                    print_info "AC does not hot-load new creature_template rows — a reload is not sufficient."
+                    print_info "Restart command:  docker restart \$WORLD_CONTAINER  (or use Main menu → Restart Server)"
+                    print_info "After restart:    .npc add 2069430    (in-game, as GM)"
+                    print_info "Verify state:     whisper 'bmah_diag' to yourself in-game"
+                else
+                    print_warning "SQL failed — run manually:"
+                    print_info "  docker exec -i \"\$DB_CONTAINER\" mysql -uroot -p\"\$DB_ROOT_PASSWORD\" acore_world < \"$_bmah_sql\""
+                fi
+            else
+                print_warning "BMAH_Up.sql not found — NPC may not be gossip-enabled."
+                print_info "Manual: UPDATE creature_template SET npcflag = npcflag | 1, faction = 35 WHERE entry = 2069430;"
+            fi
+            echo ""
+            print_step "BMAH — Client Addon"
+            echo -e "${WHITE}BMAH includes the BlackMarketUI addon for the in-game auction UI.${RST}"
+            if ask_yes_no "Auto-install BlackMarketUI addon to WoW client now?"; then
+                copy_client_addon "$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/Client Files/AddOns/BlackMarketUI" "BlackMarketUI" "BlackMarketUI addon"
+            else
+                print_info "Manual: cp -r \"$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/Client Files/AddOns/BlackMarketUI\" <WoW>/Interface/AddOns/BlackMarketUI"
+            fi
+            echo ""
+            if ask_yes_no "Configure BMAH (NPC IDs, prices, etc.) now?"; then
                 configure_ale_bmah
             fi
             echo ""
             print_info "Black Market AH Auctioneer (entry 2069430) needs to be placed in the world."
             _offer_npc_in_capitals 2069430 "Black Market AH Auctioneer" \
-                "Run after reloading ALE scripts or restarting the worldserver."
+                "Only works AFTER worldserver restart post-SQL. Use 'bmah_diag' whisper to verify state."
+            ;;
+        sod)
+            echo ""
+            print_step "Season of Discovery — File Installation"
+            local _sod_base="$clone_dir/guides/wow-wotlk/ALE-Kegs/SeasonOfDiscovery"
+            # ── Server DBC files ─────────────────────────────────
+            echo -e "${WHITE}SoD uses custom spells (IDs 80865-80870) that require server DBC files.${RST}"
+            echo ""
+            if ask_yes_no "Auto-install SoD DBC files to worldserver now?"; then
+                copy_server_dbc "$_sod_base/Server Files/dbc" "SoD server DBC files"
+            else
+                print_info "Manual: copy Server Files/dbc/*.dbc into your server's dbc/ folder"
+                print_info "  docker cp <file>.dbc $WORLD_CONTAINER:/azerothcore/env/dist/data/dbc/"
+            fi
+            echo ""
+            # ── Client Data files (MPQ patches) ──────────────────
+            echo -e "${WHITE}SoD also requires client-side MPQ patches for spell visuals and icons.${RST}"
+            echo -e "${DIM}Files: Patch-Z.MPQ, enUS/patch-enUS-3.MPQ${RST}"
+            echo ""
+            if ask_yes_no "Auto-install SoD client Data files to WoW client now?"; then
+                copy_client_data "$_sod_base/Client Files/data" "SoD client data (MPQ patches)"
+            else
+                print_info "Manual: copy Client Files/data/ contents → <WoW>/Data/"
+                print_info "  Patch-Z.MPQ → <WoW>/Data/Patch-Z.MPQ"
+                print_info "  enUS/patch-enUS-3.MPQ → <WoW>/Data/enUS/patch-enUS-3.MPQ"
+            fi
+            echo ""
+            # ── Client Interface icon ─────────────────────────────
+            echo -e "${WHITE}SoD also includes a custom buff icon for the client.${RST}"
+            if ask_yes_no "Auto-install SoD buff icon to WoW Interface/Icons/?"; then
+                copy_client_interface "$_sod_base/Client Files/Interface" "SoD buff icon"
+            else
+                print_info "Manual: copy Client Files/Interface/Icons/Buff_SoD.blp → <WoW>/Interface/Icons/"
+            fi
             ;;
         sitmeanrest)
             echo ""
@@ -3290,7 +3963,7 @@ ale_script_remove() {
     # For scripts whose deployed filenames come from the clone, collect them BEFORE removal
     local -a generic_deployed_files=()
     case "$key" in
-        levelupreward|exchangenpc|sod)
+        levelupreward)
             while IFS= read -r f; do
                 generic_deployed_files+=("$(basename "$f")")
             done < <(find "$clone_dir" -maxdepth 1 -name "*.lua" 2>/dev/null)
@@ -3306,12 +3979,13 @@ ale_script_remove() {
     local deployed_hint
     case "$key" in
         accountwide) deployed_hint="$lua_dir/accountwide/" ;;
-        activechat)  deployed_hint="$lua_dir/activechat/" ;;
+        activechat)  deployed_hint="$lua_dir/AzerothChatter/" ;;
         battlepass)  deployed_hint="$lua_dir/battlepass/  and  $lua_dir/lib/CSMH/" ;;
         paragon)     deployed_hint="$lua_dir/paragon/" ;;
-        bmah)        deployed_hint="$lua_dir/bmah_server.lua" ;;
+        bmah)        deployed_hint="$lua_dir/BMAH.lua" ;;
         lootpet)     deployed_hint="$lua_dir/LootPet.lua" ;;
         sitmeanrest)  deployed_hint="$lua_dir/SitMeansRest.lua" ;;
+        sod)         deployed_hint="$lua_dir/SOD.lua" ;;
         unlimitedammo) deployed_hint="$lua_dir/UnlimitedAmmo.lua" ;;
         *)           deployed_hint="$lua_dir/ (search for files from this script)" ;;
     esac
@@ -3321,14 +3995,15 @@ ale_script_remove() {
     if ask_yes_no "Also remove deployed Lua files from lua_scripts/?"; then
         case "$key" in
             accountwide) rm -rf "$lua_dir/accountwide" ;;
-            activechat)  rm -rf "$lua_dir/activechat" ;;
+            activechat)  rm -rf "$lua_dir/AzerothChatter" ;;
             battlepass)  rm -rf "$lua_dir/battlepass" "$lua_dir/lib/CSMH" ;;
             paragon)     rm -rf "$lua_dir/paragon" ;;
-            bmah)        rm -f  "$lua_dir/bmah_server.lua" ;;
+            bmah)        rm -f  "$lua_dir/BMAH.lua" ;;
             lootpet)     rm -f  "$lua_dir/LootPet.lua" ;;
             sitmeanrest)   rm -f "$lua_dir/SitMeansRest.lua" ;;
+            sod)           rm -f "$lua_dir/SOD.lua" ;;
             unlimitedammo) rm -f "$lua_dir/UnlimitedAmmo.lua" ;;
-            levelupreward|exchangenpc|sod)
+            levelupreward)
                 local f
                 for f in "${generic_deployed_files[@]}"; do
                     rm -f "$lua_dir/$f" 2>/dev/null || true
@@ -4305,7 +4980,9 @@ _get_about_text() {
                 '(permanent ghost on death), Semi-Hardcore (lose gear/gold on death),' \
                 'Self-Crafted, Item-Quality Level, Slow/Very Slow XP, Quest-XP Only,' \
                 'and Iron Man. Configurable rewards (items, titles, XP rate bonus).' \
-                'Requires EnablePlayerSettings = 1 in worldserver.conf.'
+                'Requires EnablePlayerSettings = 1 in worldserver.conf.' \
+                'Source: nl-saw fork. OnPlayerResurrect signature auto-patched on install' \
+                'to match the current AzerothCore API (bool& + commented param names).'
             ;;
         mod-junk-to-gold)
             printf '%s\n' \
@@ -4323,6 +5000,37 @@ _get_about_text() {
                 'permanently in capitals — install flow provides coordinates. Add 601026' \
                 'to Creatures.CustomIDs in worldserver.conf to silence a harmless warning.'
             ;;
+        mod-quest-loot-party)
+            printf '%s\n' \
+                'When any party member loots a normal-quality quest item, all party' \
+                'members with the same quest active automatically receive the item.' \
+                'Eliminates repeated boss kills when questing as a group. Fully' \
+                'automatic — no player commands needed.'
+            ;;
+        mod-arac)
+            printf '%s\n' \
+                'All Races All Classes (ARAC) — unlocks every race/class combination' \
+                'not normally available (Night Elf Warrior, Undead Paladin, etc.).' \
+                'DATA-ONLY mod: no worldserver rebuild required. Configure applies three' \
+                'steps automatically: arac.sql → acore_world, server DBC patch, and' \
+                'client Patch-A.MPQ. Back up your database before applying SQL.'
+            ;;
+        mod-dungeon-master)
+            printf '%s\n' \
+                'Procedural roguelike dungeon challenge system. Talk to the Dungeon' \
+                'Master NPC (entry 500000) to pick a difficulty tier, creature theme,' \
+                'and dungeon — then enter a repopulated scaled instance. 37 dungeons,' \
+                '9 themes, 6 difficulty tiers, party and solo support. The NPC' \
+                'auto-spawns in all major cities; SQL is auto-applied on server start.'
+            ;;
+        mod-talentbutton)
+            printf '%s\n' \
+                'Enables Dual Talent Specialization at level 10 and adds an anywhere' \
+                'talent reset — no class trainer visit required. Uses server-side' \
+                'script injection for the in-game button. IMPORTANT: requires an' \
+                'unpatched WoW 3.3.5a client; tools like RCEPatcher break the injection.' \
+                'Activate by setting TalentButton.Enable = 1 in mod_talentbutton.conf.'
+            ;;
         accountwide)
             printf '%s\n' \
                 'Syncs achievements, currencies, gold, mounts, and pets across' \
@@ -4333,27 +5041,20 @@ _get_about_text() {
             ;;
         levelupreward)
             printf '%s\n' \
-                'Sends in-game mail with gold or items when players hit' \
-                'configured levels. A lore-friendly mode includes the player' \
-                'rank in the mail text. Default rewards scale from 1g at' \
-                'level 10 up to generous amounts at higher levels. Fully' \
-                'customizable per level in the Lua config.'
-            ;;
-        exchangenpc)
-            printf '%s\n' \
-                'Spawns a configurable NPC (Roboto, entry 1116001) that swaps' \
-                'items for other items -- a custom material-exchange vendor.' \
-                'Define exchange pairs in the Lua config, apply the world SQL' \
-                'during install, then manually spawn the NPC in the world.' \
-                'The install flow offers capital-city spawn coordinates.'
+                'Awards a random class-appropriate equippable item on every' \
+                'level-up. Quality is rolled: 10% Epic, 25% Rare, 65% Uncommon,' \
+                'with a fallback chain down to Common if the DB has no match.' \
+                'Armor type scales with level (e.g. Warrior/Paladin switch' \
+                'Mail → Plate at 40). First level-up also teaches all class' \
+                'weapon proficiencies. Built natively for mod-ale.'
             ;;
         activechat)
             printf '%s\n' \
-                'Simulates lively world and guild chat with scripted dialogues' \
-                'between fake players, making low-population servers feel' \
-                'inhabited. Chat text tables are fully customizable -- add new' \
-                'lines to npc_text.lua and npc_text_guild.lua to expand the' \
-                'conversation pool.'
+                'Fills world chat with ambient lore-grounded RP chatter from' \
+                'a roster of recurring named residents — each with a faction,' \
+                'role, and personality type. Time-of-day, seasonal, and' \
+                'in-game event aware. 45+ lore placeholders keep lines fresh.' \
+                'A major upgrade over the original ActiveChat. Requires mod-ale.'
             ;;
         battlepass)
             printf '%s\n' \
@@ -4361,7 +5062,7 @@ _get_about_text() {
                 'kills, quests, PvP, and dungeons. Rewards include items, gold,' \
                 'titles, and spells. Comes with an in-game client addon for' \
                 'progress tracking and an NPC vendor fallback. Players use .bp' \
-                'commands; GMs use .bpadmin. Requires the CSMH library.'
+                'commands; GMs use .bpadmin. Full CSMH client-server sync included.'
             ;;
         paragon)
             printf '%s\n' \
@@ -4389,11 +5090,12 @@ _get_about_text() {
             ;;
         sod)
             printf '%s\n' \
-                'Awards a tiered XP bonus buff mimicking the Season of' \
-                'Discovery Discoverer Delight experience. Applies bonuses' \
-                'from +50% to +300% based on player level range, using custom' \
-                'spell IDs 80865 through 80870. Requires the matching spell' \
-                'data to be present on the server.'
+                'Tiered Discoverer'"'"'s Delight XP bonus sourced from the' \
+                'Dad'"'"'s MMO Lab ALE-Kegs collection. Applies +300% at 1-10,' \
+                'stepping down through +250/200/150/100/50% to level 79.' \
+                'Level 80 receives no buff. Auto-refreshes on level-up.' \
+                'Requires server DBC files (custom spells 80865-80870) AND' \
+                'client MPQ patches + icon — all installed automatically.'
             ;;
         sitmeanrest)
             printf '%s\n' \
@@ -4547,7 +5249,7 @@ menu_ale_scripts() {
         local entry key name url cloned deployed marker
 
         for entry in "${ALE_SCRIPT_REGISTRY[@]}"; do
-            IFS='|' read -r key name url <<< "$entry"
+            IFS='|' read -r key name url branch <<< "$entry"
             cloned=false; deployed=false
             ale_script_is_installed "$key" && cloned=true
             ale_lua_is_deployed     "$key" && deployed=true
@@ -4587,7 +5289,7 @@ menu_ale_scripts() {
 
         local idx
         for (( idx=page_start; idx<page_end; idx++ )); do
-            IFS='|' read -r key name url <<< "${available_entries[$idx]}"
+            IFS='|' read -r key name url branch <<< "${available_entries[$idx]}"
             printf "  ${WHITE}%2d)${RST} %-38s %b\n" "$(( idx + 1 ))" "$name" "${markers[$idx]}"
         done
 
@@ -4630,8 +5332,8 @@ menu_ale_scripts() {
                     press_enter; continue
                 fi
                 local inum="$_PARSED_INDEX"
-                IFS='|' read -r key name url <<< "${available_entries[$((inum - 1))]}"
-                ale_script_install "$key" "$name" "$url" || true
+                IFS='|' read -r key name url branch <<< "${available_entries[$((inum - 1))]}"
+                ale_script_install "$key" "$name" "$url" "$branch" || true
                 press_enter
                 ;;
             r)
@@ -4640,7 +5342,7 @@ menu_ale_scripts() {
                     press_enter; continue
                 fi
                 local rnum="$_PARSED_INDEX"
-                IFS='|' read -r key name url <<< "${available_entries[$((rnum - 1))]}"
+                IFS='|' read -r key name url branch <<< "${available_entries[$((rnum - 1))]}"
                 ale_script_remove "$key" "$name"
                 press_enter
                 ;;
@@ -4650,9 +5352,10 @@ menu_ale_scripts() {
                     press_enter; continue
                 fi
                 local cnum="$_PARSED_INDEX"
-                IFS='|' read -r key name url <<< "${available_entries[$((cnum - 1))]}"
+                IFS='|' read -r key name url branch <<< "${available_entries[$((cnum - 1))]}"
                 case "$key" in
                     accountwide) configure_ale_accountwide ;;
+                    activechat)  configure_ale_activechat ;;
                     battlepass) configure_ale_battlepass ;;
                     paragon)    configure_ale_paragon ;;
                     bmah)       configure_ale_bmah ;;
@@ -4669,7 +5372,7 @@ menu_ale_scripts() {
                     print_warning "Invalid script number -- e.g. ?5"
                     press_enter; continue
                 fi
-                IFS='|' read -r key name url <<< "${available_entries[$((anum - 1))]}"
+                IFS='|' read -r key name url branch <<< "${available_entries[$((anum - 1))]}"
                 show_about "$key" "$name" "$url"
                 ;;
             *)
@@ -4699,6 +5402,25 @@ _module_post_install_hook() {
             ;;
         mod-challenge-modes)
             echo ""
+            # Patch: newer AzerothCore changed the OnPlayerResurrect hook signature.
+            # The nl-saw fork has the old signature (bool instead of bool&, named params).
+            # Both occurrences must be commented-out to match the current AC API.
+            local _cm_dir="$SERVER_DIR/modules/mod-challenge-modes"
+            local _cm_src="$_cm_dir/src/ChallengeModes.cpp"
+            if [ -f "$_cm_src" ] && grep -q "float restore_percent, bool applySickness" "$_cm_src"; then
+                print_step "Patching OnPlayerResurrect signature in ChallengeModes.cpp..."
+                sed -i 's/float restore_percent, bool applySickness/float \/*restore_percent*\/, bool\& \/*applySickness*\//g' "$_cm_src"
+                local _patch_count
+                _patch_count=$(grep -c "bool& /\*applySickness\*/" "$_cm_src" 2>/dev/null || echo "0")
+                if [ "$_patch_count" -ge 1 ]; then
+                    print_success "Patched $_patch_count occurrence(s) — module now matches current AC API."
+                else
+                    print_warning "Patch may not have applied cleanly — verify ChallengeModes.cpp manually."
+                    print_info "Lines 448 and 641: change 'float restore_percent, bool applySickness'"
+                    print_info "  to: 'float /*restore_percent*/, bool& /*applySickness*/'"
+                fi
+            fi
+            echo ""
             print_info "Challenge Modes has a conf file and requires EnablePlayerSettings = 1."
             print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
             if ask_yes_no "Configure Challenge Modes now?"; then configure_module_challenge_modes; fi
@@ -4720,6 +5442,12 @@ _module_post_install_hook() {
             _offer_npc_in_capitals 601026 "White Fang (Beastmaster NPC)" \
                 "Run these commands after rebuilding and starting the worldserver."
             ;;
+        mod-quest-loot-party)
+            echo ""
+            print_info "Module SQL (module_string entries) will be auto-applied on next server start."
+            print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
+            if ask_yes_no "Configure Quest Loot Party now?"; then configure_module_quest_loot_party; fi
+            ;;
         mod-transmog)
             echo ""
             print_info "Transmogrification adds NPC entry 190010 — it must be manually placed in the world."
@@ -4731,6 +5459,28 @@ _module_post_install_hook() {
             print_info "1v1 Arena adds a Battlemaster NPC (entry 999991) — it must be manually placed in the world."
             _offer_npc_in_capitals 999991 "Arena Battlemaster 1v1" \
                 "Run these commands after rebuilding and starting the worldserver."
+            ;;
+        mod-arac)
+            echo ""
+            print_info "Run Configure (c) to apply SQL, copy server DBC files, and install Patch-A.MPQ."
+            if ask_yes_no "Configure ARAC now?"; then
+                configure_mod_arac
+            fi
+            ;;
+        mod-dungeon-master)
+            echo ""
+            print_info "Dungeon Master SQL will be auto-applied on next server start."
+            print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
+            if ask_yes_no "Configure Dungeon Master now?"; then configure_module_dungeon_master; fi
+            echo ""
+            print_info "Dungeon Master NPC (entry 500000) spawns automatically in all major cities."
+            print_info "You can also place one manually anywhere with: .npc add 500000"
+            ;;
+        mod-talentbutton)
+            echo ""
+            print_warning "Talent Button requires an UNPATCHED WoW 3.3.5a client (RCEPatcher blocks script injection)."
+            print_info "Note: rebuild the worldserver first if the conf.dist is not yet present."
+            if ask_yes_no "Configure Talent Button now?"; then configure_module_talentbutton; fi
             ;;
     esac
 }
@@ -4889,19 +5639,26 @@ menu_modules() {
                 print_header
                 module_install "$key" "$name" "$url" "$sql_dirs" || true
                 upsert_mod_commands "$key"
-                print_info "Module cloned. SQL files will be applied automatically on next server start."
-                print_info "All C++ modules require a worldserver rebuild before they can load."
-                print_info "Conf files can be set up via 'Configure' — run configure after a rebuild if"
-                print_info "the conf.dist files are not yet present."
-
-                if [ "$SERVER_TYPE" = "playerbots" ]; then
-                    print_info "Rebuild the worldserver to compile the new module in."
-                    echo ""
-                    if ask_yes_no "Rebuild the worldserver now?"; then
-                        rebuild_worldserver
-                    fi
+                if [ "$key" = "mod-arac" ]; then
+                    print_info "mod-arac cloned. This is a data-only mod — NO REBUILD REQUIRED."
+                    print_info "Run Configure (c) to apply SQL, copy server DBC files, and install the client MPQ."
                 else
-                    print_info "(Skipping rebuild — not supported on this install type.)"
+                    print_info "Module cloned. SQL files will be applied automatically on next server start."
+                    print_info "All C++ modules require a worldserver rebuild before they can load."
+                    print_info "Conf files can be set up via 'Configure' — run configure after a rebuild if"
+                    print_info "the conf.dist files are not yet present."
+                fi
+
+                if [ "$key" != "mod-arac" ]; then
+                    if [ "$SERVER_TYPE" = "playerbots" ]; then
+                        print_info "Rebuild the worldserver to compile the new module in."
+                        echo ""
+                        if ask_yes_no "Rebuild the worldserver now?"; then
+                            rebuild_worldserver
+                        fi
+                    else
+                        print_info "(Skipping rebuild — not supported on this install type.)"
+                    fi
                 fi
 
                 _module_post_install_hook "$key"
@@ -4944,9 +5701,13 @@ menu_modules() {
                 case "$key" in
                     mod-ah-bot)                  configure_ahbot ;;
                     mod-ale)                     configure_ale ;;
+                    mod-arac)                    configure_mod_arac ;;
                     mod-challenge-modes)         configure_module_challenge_modes ;;
+                    mod-dungeon-master)          configure_module_dungeon_master ;;
                     mod-player-bot-level-brackets) configure_module_bot_level_brackets ;;
                     mod-npc-beastmaster)         configure_module_npc_beastmaster ;;
+                    mod-quest-loot-party)        configure_module_quest_loot_party ;;
+                    mod-talentbutton)            configure_module_talentbutton ;;
                     *)
                         print_info "$name has no dedicated configure option."
                         print_info "Edit its .conf file in $SERVER_DIR/env/dist/etc/modules/ directly."
@@ -4979,6 +5740,9 @@ _module_conf_name() {
         mod-aoe-loot)                   echo "mod_aoe_loot.conf" ;;
         mod-ah-bot)                     echo "mod_ahbot.conf" ;;
         mod-autobalance)                echo "AutoBalance.conf" ;;
+        mod-arac)                       echo "" ;;
+        mod-dungeon-master)             echo "mod_dungeon_master.conf" ;;
+        mod-talentbutton)               echo "mod_talentbutton.conf" ;;
         mod-ale)                        echo "mod_ale.conf" ;;
         mod-player-bot-level-brackets)  echo "mod_player_bot_level_brackets.conf" ;;
         mod-challenge-modes)            echo "challenge_modes.conf" ;;
@@ -4986,6 +5750,7 @@ _module_conf_name() {
         mod-junk-to-gold)               echo "" ;;
         mod-learn-spells)               echo "mod_learnspells.conf" ;;
         mod-npc-beastmaster)            echo "mod_npc_beastmaster.conf" ;;
+        mod-quest-loot-party)           echo "mod-quest-loot-party.conf" ;;
         mod-solocraft)                  echo "Solocraft.conf" ;;
         mod-transmog)                   echo "transmog.conf" ;;
         *)                              echo "" ;;
@@ -5146,6 +5911,12 @@ _module_conf_hints() {
                 '  - BeastMaster.AllowedClasses' \
                 '  - BeastMaster.MinLevel' \
                 'Tip: add 601026 to Creatures.CustomIDs in worldserver.conf.'
+            ;;
+        mod-quest-loot-party)
+            printf '%s\n' \
+                'Settings:' \
+                '  - QuestParty.Enable  (true/false — master on/off)' \
+                '  - QuestParty.Message (true/false — show login announcement)'
             ;;
         mod-solocraft)
             printf '%s\n' \
@@ -5454,6 +6225,19 @@ show_first_run_welcome() {
     echo -e "${DIM}This welcome shows once per install. The marker file at${RST}"
     echo -e "${DIM}$marker tracks this.${RST}"
     echo ""
+    # Offer client folder detection on first run
+    echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
+    echo -e "${WHITE}${BOLD} WoW Client Folder${RST}"
+    echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
+    echo -e "${WHITE}Some mods include WoW client addons. Detecting your client${RST}"
+    echo -e "${WHITE}folder now lets the manager auto-install them for you.${RST}"
+    echo ""
+    if ask_yes_no "Detect WoW client folder now? (can skip and do later via option 16)"; then
+        detect_wow_client || true
+    else
+        print_info "You can set this anytime from the main menu → option 16."
+    fi
+    echo ""
     press_enter
 
     # Drop the marker — silent failure is OK, the welcome just shows again next time
@@ -5598,6 +6382,284 @@ menu_sql_mods() {
 }
 
 # ── Server Maintenance submenu ───────────────────────────────
+# Scan installed module SQL files and mark any untracked ones as applied,
+# fixing ac-db-import "Table X already exists" failures without dropping data.
+fix_dbimport_table_exists() {
+    print_step "Fix: ac-db-import Table Already Exists"
+    echo ""
+    echo -e "${WHITE}This scans every installed module's SQL files. For any file${RST}"
+    echo -e "${WHITE}not tracked in the ${CYAN}updates${RST}${WHITE} table, it computes the file hash${RST}"
+    echo -e "${WHITE}and inserts a tracking row so ac-db-import will skip it.${RST}"
+    echo ""
+    echo -e "${WHITE}Use this when:${RST}"
+    echo -e "  ${CYAN}• ac-db-import fails with 'Table X already exists'${RST}"
+    echo -e "  ${CYAN}• The module SQL does NOT use CREATE TABLE IF NOT EXISTS${RST}"
+    echo ""
+    refresh_container_names
+    sqlmod_init
+    if ! container_running "$DB_CONTAINER"; then
+        print_error "Database container is not running — start the server first."
+        return 1
+    fi
+    local fixed=0 skipped=0
+    local entry key db_full files db_short
+    for entry in "${MODULE_UPDATE_FILES[@]}"; do
+        IFS='|' read -r key db_full files <<< "$entry"
+        [ -z "$files" ] && continue
+        ! module_is_installed "$key" && continue
+        db_short="${db_full#acore_}"
+        local f
+        for f in $files; do
+            # Check if this file already has a tracking row
+            local rows
+            rows=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -N \
+                "$db_full" \
+                -e "SELECT COUNT(*) FROM updates WHERE name='$f';" 2>/dev/null \
+                | tr -d '[:space:]')
+            if [ "$rows" != "0" ] && [ -n "$rows" ]; then
+                echo -e "  ${DIM}○ Already tracked:${RST} $f"
+                skipped=$((skipped + 1))
+                continue
+            fi
+            # Find the file in the modules directory
+            local sql_file
+            sql_file=$(find "$SERVER_DIR/modules/$key" -name "$f" 2>/dev/null | head -1)
+            if [ -z "$sql_file" ]; then
+                echo -e "  ${YELLOW}? File not found:${RST} $f"
+                continue
+            fi
+            local hash; hash=$(compute_sql_hash "$sql_file")
+            if [ -z "$hash" ]; then
+                echo -e "  ${RED}✗ Hash failed:${RST} $f"
+                continue
+            fi
+            docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" \
+                "$db_full" \
+                -e "INSERT INTO updates (name,hash,state,timestamp,speed)
+                    VALUES ('$f','$hash','RELEASED',NOW(),0)
+                    ON DUPLICATE KEY UPDATE hash='$hash',state='RELEASED';" \
+                2>/dev/null
+            echo -e "  ${GREEN}✓ Marked as applied:${RST} $f  ${DIM}(${hash:0:7})${RST}"
+            fixed=$((fixed + 1))
+        done
+    done
+    echo ""
+    if [ "$fixed" -gt 0 ]; then
+        print_success "$fixed file(s) marked as applied."
+        print_info "Restart the server — ac-db-import should now pass."
+    else
+        print_info "No untracked files found (all already marked or no known files)."
+        if [ "$skipped" -gt 0 ]; then
+            print_info "If ac-db-import still fails, try option 1 (Repair install state) to"
+            print_info "clear stale hashes and force a re-apply with mode C (Clear tracking)."
+        fi
+    fi
+}
+
+fix_battlepass_npc() {
+    print_step "Fix: BattlePass NPC (entry 90100) missing from database"
+    echo ""
+    echo -e "${WHITE}Creates creature_template entry 90100 (Battle Pass Vendor) in acore_world.${RST}"
+    echo -e "${WHITE}Required before .npc add 90100 will work in-game.${RST}"
+    echo ""
+    refresh_container_names
+    sqlmod_init
+    if ! container_running "$DB_CONTAINER"; then
+        print_error "Database container is not running — start the server first."
+        return 1
+    fi
+    local _mdb="docker exec $DB_CONTAINER mysql -uroot -p$DB_ROOT_PASSWORD"
+    # Step 1: show current state
+    local _pre
+    _pre=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -N -e \
+        "SELECT IFNULL(CONCAT('EXISTS: entry=',entry,' name=',name),'NOT FOUND') FROM acore_world.creature_template WHERE entry=90100 UNION ALL SELECT 'NOT FOUND' LIMIT 1;" 2>/dev/null | head -1)
+    print_info "Current DB state: ${_pre:-unknown}"
+    # Step 2: DELETE (separate call — FK checks off)
+    local _del_out
+    _del_out=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" \
+        -e "SET foreign_key_checks=0; DELETE FROM acore_world.creature_template WHERE entry=90100; SET foreign_key_checks=1;" 2>&1)
+    local _del_rc=$?
+    local _del_errs; _del_errs=$(echo "$_del_out" | grep -v "^\(mysql:\|$\)")
+    if [ $_del_rc -ne 0 ] || echo "$_del_errs" | grep -qi "^ERROR"; then
+        print_error "DELETE failed (rc=$_del_rc): $_del_errs"
+        return 1
+    fi
+    # Step 3: INSERT (separate call — explicit schema, FK off, sql_mode cleared)
+    local _ins_out
+    _ins_out=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" \
+        -e "SET foreign_key_checks=0; SET sql_mode=''; INSERT INTO acore_world.creature_template (\`entry\`,\`name\`,\`subname\`,\`gossip_menu_id\`,\`minlevel\`,\`maxlevel\`,\`exp\`,\`faction\`,\`npcflag\`,\`speed_walk\`,\`speed_run\`,\`rank\`,\`dmgschool\`,\`DamageModifier\`,\`BaseAttackTime\`,\`RangeAttackTime\`,\`BaseVariance\`,\`RangeVariance\`,\`unit_class\`,\`unit_flags\`,\`unit_flags2\`,\`dynamicflags\`,\`type\`,\`AIName\`,\`MovementType\`,\`HoverHeight\`,\`HealthModifier\`,\`ManaModifier\`,\`ArmorModifier\`,\`RegenHealth\`,\`flags_extra\`,\`VerifiedBuild\`) VALUES (90100,'Battle Pass Vendor','Seasonal Rewards',0,80,80,0,35,1,1.0,1.14286,0,0,1.0,2000,2000,1.0,1.0,1,33536,2048,0,7,'',0,1.0,1.0,1.0,1.0,1,2,0); SET foreign_key_checks=1;" 2>&1)
+    local _ins_rc=$?
+    local _ins_errs; _ins_errs=$(echo "$_ins_out" | grep -v "^\(mysql:\|$\)")
+    if [ $_ins_rc -ne 0 ] || echo "$_ins_errs" | grep -qi "^ERROR"; then
+        print_error "INSERT failed (rc=$_ins_rc): $_ins_errs"
+        print_info "This usually means a column mismatch. Try running the Server Maintenance → 5 again after a worldserver restart."
+        return 1
+    fi
+    # Step 4: schema-adaptive model/scale (non-fatal)
+    docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -e \
+        "SET @h=(SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='acore_world' AND TABLE_NAME='creature_template' AND COLUMN_NAME='scale'); SET @s=IF(@h>0,'UPDATE acore_world.creature_template SET scale=1.0 WHERE entry=90100','SELECT 1'); PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;" 2>/dev/null
+    docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -e \
+        "SET @h=(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='acore_world' AND TABLE_NAME='creature_template_model'); SET @s=IF(@h>0,'DELETE FROM acore_world.creature_template_model WHERE CreatureID=90100','SELECT 1'); PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;" 2>/dev/null
+    docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -e \
+        "SET @h=(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='acore_world' AND TABLE_NAME='creature_template_model'); SET @s=IF(@h>0,'INSERT INTO acore_world.creature_template_model (CreatureID,Idx,CreatureDisplayID,DisplayScale,Probability,VerifiedBuild) VALUES (90100,0,25478,1.0,1.0,0)','SELECT 1'); PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;" 2>/dev/null
+    docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -e \
+        "SET @h=(SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='acore_world' AND TABLE_NAME='creature_template' AND COLUMN_NAME='modelid1'); SET @s=IF(@h>0,'UPDATE acore_world.creature_template SET modelid1=25478 WHERE entry=90100','SELECT 1'); PREPARE _p FROM @s; EXECUTE _p; DEALLOCATE PREPARE _p;" 2>/dev/null
+    # Step 5: verify
+    local _bp_verify
+    _bp_verify=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -N -e \
+        "SELECT CONCAT('entry=',entry,' name=',name,' npcflag=',npcflag) FROM acore_world.creature_template WHERE entry=90100;" 2>/dev/null)
+    if echo "$_bp_verify" | grep -q "entry=90100"; then
+        print_success "Verified: entry 90100 exists in DB → $_bp_verify"
+    else
+        print_error "Verification failed — entry 90100 not found after SQL."
+        print_info "Run this diagnostic manually on the Steam Deck:"
+        print_info "  docker exec \$DB_CONTAINER mysql -uroot -ppassword -e \"SHOW COLUMNS FROM acore_world.creature_template LIKE 'entry';\" 2>&1"
+        return 1
+    fi
+    echo ""
+    if ask_yes_no "Restart the worldserver now to load the new creature_template?"; then
+        if [ -z "$WORLD_CONTAINER" ] || ! container_running "$WORLD_CONTAINER"; then
+            print_error "Worldserver container not running — start the server first, then restart manually."
+        elif docker restart "$WORLD_CONTAINER"; then
+            print_success "Worldserver restarted — use .npc add 90100 in-game to spawn the NPC."
+        else
+            print_error "Restart failed. Container: $WORLD_CONTAINER"
+        fi
+    else
+        print_info "Remember to restart the worldserver before spawning."
+        print_info "  Main menu → Restart Server  or:  ${CYAN}docker restart $WORLD_CONTAINER${RST}"
+        print_info "  then in-game: ${CYAN}.npc add 90100${RST}"
+    fi
+}
+
+fix_battlepass_csmh_crash() {
+    print_step "Fix: BattlePass CSMH double-load crash"
+    echo ""
+    echo -e "${WHITE}Root cause: CSMH_SMH.ext is a plain Lua file that ALE auto-loads${RST}"
+    echo -e "${WHITE}BEFORE any .lua scripts. When 05_BP_Communication.lua then calls${RST}"
+    echo -e "${WHITE}require(\"lib.CSMH.CSMH_SMH\"), CSMH is loaded a SECOND time — which${RST}"
+    echo -e "${WHITE}registers duplicate event handlers and corrupts internal state.${RST}"
+    echo -e "${WHITE}Fix: remove the redundant require line. Full CSMH client sync kept.${RST}"
+    echo ""
+    local lua_dir
+    lua_dir=$(ale_lua_scripts_dir)
+    local comm_file="$lua_dir/battlepass/05_BP_Communication.lua"
+    if [ ! -d "$lua_dir/battlepass" ]; then
+        print_error "BattlePass not deployed at: $lua_dir/battlepass"
+        print_info "Deploy it first via: ALE Scripts → Install → battlepass"
+        return 1
+    fi
+    if [ ! -f "$comm_file" ]; then
+        print_error "File not found: $comm_file"
+        return 1
+    fi
+    # Check if already patched
+    if grep -q "require removed" "$comm_file" 2>/dev/null; then
+        print_info "Already patched — require line already removed."
+    elif grep -q 'require("lib\.CSMH\.CSMH_SMH")' "$comm_file" 2>/dev/null; then
+        sed -i 's|^require("lib\.CSMH\.CSMH_SMH")|-- require removed: CSMH_SMH.ext is auto-loaded by ALE before .lua scripts run|' "$comm_file"
+        print_success "Patched: removed duplicate require in $comm_file"
+    else
+        print_info "require line not found — file may already be clean or have a different format."
+        grep -n "CSMH\|require" "$comm_file" | head -5
+    fi
+    echo ""
+    print_info "Next steps:"
+    print_info "  1. In-game GM command:  ${CYAN}.reload ale${RST}"
+    print_info "  2. OR restart the worldserver from the main menu."
+    print_info "  Full CSMH client sync is preserved — all BattlePass features work."
+}
+
+# ─────────────────────────────────────────────────────────────
+# cleanup_docker
+#   Prunes Docker build cache and optionally build volumes.
+#   Safe by design: always keeps the database volume running.
+#   Use after removing modules or when a rebuild isn't picking
+#   up changes due to stale cache layers.
+# ─────────────────────────────────────────────────────────────
+cleanup_docker() {
+    print_step "Docker Cleanup"
+    echo ""
+    echo -e "${WHITE}Frees disk space and forces a clean rebuild on next start.${RST}"
+    echo -e "${WHITE}Useful after removing modules or when cached layers are stale.${RST}"
+    echo ""
+    echo -e "${WHITE}${BOLD}Choose cleanup level:${RST}"
+    echo ""
+    printf "  ${WHITE}1)${RST} Build cache only  ${DIM}(safe — frees space, next rebuild is full recompile)${RST}\n"
+    printf "  ${WHITE}2)${RST} Build cache + build volume  ${DIM}(deeper clean — also wipes CMake artifacts)${RST}\n"
+    printf "  ${WHITE}3)${RST} Full clean  ${DIM}(cache + build volume + old images — maximum disk recovery)${RST}\n"
+    printf "  ${DIM}  [ENTER] Cancel${RST}\n"
+    echo ""
+    printf "${WHITE}Choice: ${RST}"
+    read -r choice
+    [ -z "$choice" ] && return 0
+
+    case "$choice" in
+        1|2|3) ;;
+        *) print_warning "Invalid choice."; return 1 ;;
+    esac
+
+    # Ensure DB is running before we touch anything, so its volume stays attached
+    refresh_container_names
+    local db_was_running=false
+    if container_running "$DB_CONTAINER"; then
+        db_was_running=true
+    else
+        print_info "Starting database container to protect its volume..."
+        (cd "$SERVER_DIR" && docker compose up -d ac-database 2>/dev/null) || true
+        sleep 3
+        refresh_container_names
+    fi
+
+    # Stop worldserver (not DB) before cleanup
+    print_info "Stopping worldserver..."
+    (cd "$SERVER_DIR" && docker compose stop ac-worldserver 2>/dev/null) || true
+
+    echo ""
+    print_info "Pruning Docker build cache..."
+    if docker builder prune -af 2>&1 | grep -E "Total reclaimed|freed|error" ; then
+        print_success "Build cache cleared."
+    else
+        print_warning "builder prune had non-zero exit — may already be empty."
+    fi
+
+    if [ "$choice" -ge 2 ]; then
+        echo ""
+        print_info "Identifying build volume..."
+        local project; project=$(basename "$SERVER_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
+        # AzerothCore source-build volume is typically <project>_ac-build or <project>_build
+        local build_vol
+        build_vol=$(docker volume ls --format '{{.Name}}' 2>/dev/null \
+            | grep -E "^${project}.*(ac.build|build)" | head -1)
+        if [ -n "$build_vol" ]; then
+            print_info "Removing build volume: $build_vol"
+            if docker volume rm "$build_vol" 2>/dev/null; then
+                print_success "Build volume removed — CMake cache cleared."
+            else
+                print_warning "Could not remove $build_vol (may still be in use)."
+                print_info "Run: docker volume rm $build_vol  after fully stopping the server."
+            fi
+        else
+            print_info "No build volume found matching '${project}*build' — nothing to remove."
+            print_info "  (Run 'docker volume ls' to inspect manually if needed.)"
+        fi
+    fi
+
+    if [ "$choice" -ge 3 ]; then
+        echo ""
+        print_info "Removing unused Docker images..."
+        docker image prune -af 2>&1 | grep -E "Total reclaimed|deleted|error" || true
+        print_success "Old images removed."
+    fi
+
+    echo ""
+    print_success "Cleanup complete."
+    echo ""
+    echo -e "${WHITE}Next step: rebuild the worldserver${RST}"
+    echo -e "  ${CYAN}Configuration → Rebuild Worldserver${RST}"
+    echo -e "${DIM}  The first rebuild after this will take 30–90 min (full recompile).${RST}"
+}
+
 menu_server_maintenance() {
     _setup_screen
     while true; do
@@ -5611,6 +6673,10 @@ menu_server_maintenance() {
         printf "  ${WHITE}1)${RST} Repair install state\n"
         printf "  ${WHITE}2)${RST} Backup databases\n"
         printf "  ${WHITE}3)${RST} Restore / import a backup\n"
+        printf "  ${WHITE}4)${RST} Fix: ac-db-import 'Table already exists' errors\n"
+        printf "  ${WHITE}5)${RST} Fix: BattlePass NPC missing (entry 90100)\n"
+        printf "  ${WHITE}6)${RST} Fix: BattlePass crash (remove duplicate CSMH require)\n"
+        printf "  ${WHITE}7)${RST} Clean Docker cache / build artifacts\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${DIM}  [ENTER] Back${RST}\n"
 
@@ -5626,8 +6692,12 @@ menu_server_maintenance() {
             1) repair_install_state; press_enter ;;
             2) _maintenance_backup_all; press_enter ;;
             3) _maintenance_import ;;
+            4) fix_dbimport_table_exists; press_enter ;;
+            5) fix_battlepass_npc; press_enter ;;
+            6) fix_battlepass_csmh_crash; press_enter ;;
+            7) cleanup_docker; press_enter ;;
             "") return ;;
-            *) print_warning "Enter 1–3 or ENTER to go back."; press_enter ;;
+            *) print_warning "Enter 1–7 or ENTER to go back."; press_enter ;;
         esac
     done
 }
@@ -5646,8 +6716,8 @@ _maintenance_backup_all() {
         local bfile="$SQLMOD_BACKUP_DIR/${ts}_${db}.sql.gz"
         print_info "Backing up ${db} → $(basename "$bfile") ..."
         if ( set -o pipefail
-             docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" "$db" \
-                 2>/dev/null | gzip > "$bfile"
+            docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" "$db" \
+                2>/dev/null | gzip > "$bfile"
         ); then
             print_success "  ✓ $db"
             _prune_backup_files "$SQLMOD_BACKUP_DIR" "*_${db}.sql.gz" 2
@@ -5735,8 +6805,8 @@ _maintenance_import() {
     local ts; ts=$(date +%Y%m%d_%H%M%S)
     local safefile="$SQLMOD_BACKUP_DIR/${ts}_pre_restore_${target_db}.sql.gz"
     if ( set -o pipefail
-         docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" "$target_db" \
-             2>/dev/null | gzip > "$safefile"
+        docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" "$target_db" \
+            2>/dev/null | gzip > "$safefile"
     ); then
         print_success "Safety backup: $(basename "$safefile")"
     else
@@ -5765,6 +6835,113 @@ _maintenance_import() {
     press_enter
 }
 
+menu_configuration() {
+    while true; do
+        if [ "$_RESIZE_NEEDED" = true ]; then
+            _RESIZE_NEEDED=false
+            _setup_screen
+        fi
+        print_header
+        print_install_info
+        printf "\n\n  ${GOLD}${BOLD}Configuration${RST}\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${WHITE}C)${RST} Set WoW Client Folder\n"
+        printf "  ${WHITE}1)${RST} Configure AH Bot\n"
+        printf "  ${WHITE}2)${RST} Configure ALE\n"
+        printf "  ${WHITE}3)${RST} Configure Modules\n"
+        printf "  ${WHITE}4)${RST} View In-Game Commands\n"
+        printf "  ${WHITE}5)${RST} Rebuild Worldserver\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${DIM}  [ENTER] Back${RST}\n"
+        local _tlines; _tlines=$_TERM_LINES
+        if ! _read_menu_input "$(( _tlines - 1 ))"; then
+            local _read_rc=$?
+            [ "$_read_rc" -eq 2 ] && continue
+            return
+        fi
+        local choice="${_MENU_INPUT,,}"
+        case "$choice" in
+            c)  configure_wow_client; press_enter ;;
+            1)  configure_ahbot; press_enter ;;
+            2)  configure_ale; press_enter ;;
+            3)  menu_module_management ;;
+            4)  show_ingame_commands ;;
+            5)  rebuild_worldserver; press_enter ;;
+            "")  return ;;
+            *)  print_warning "Enter C, 1–5 or ENTER to go back."; press_enter ;;
+        esac
+    done
+}
+menu_server_modifications() {
+    while true; do
+        if [ "$_RESIZE_NEEDED" = true ]; then
+            _RESIZE_NEEDED=false
+            _setup_screen
+        fi
+        print_header
+        print_install_info
+        printf "\n\n  ${GOLD}${BOLD}Server Modifications${RST}\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${WHITE}1)${RST} Manage AzerothCore Modules\n"
+        printf "  ${WHITE}2)${RST} Manage ALE Lua Mods\n"
+        printf "  ${WHITE}3)${RST} Manage SQL Mods\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${DIM}  [ENTER] Back${RST}\n"
+        local _tlines; _tlines=$_TERM_LINES
+        if ! _read_menu_input "$(( _tlines - 1 ))"; then
+            local _read_rc=$?
+            [ "$_read_rc" -eq 2 ] && continue
+            return
+        fi
+        local choice="${_MENU_INPUT,,}"
+        case "$choice" in
+            1)  menu_modules ;;
+            2)  menu_ale_scripts ;;
+            3)  menu_sql_mods ;;
+            "")  return ;;
+            *)  print_warning "Enter 1–3 or ENTER to go back."; press_enter ;;
+        esac
+    done
+}
+menu_server_controls() {
+    while true; do
+        if [ "$_RESIZE_NEEDED" = true ]; then
+            _RESIZE_NEEDED=false
+            _setup_screen
+        fi
+        print_header
+        print_install_info
+        printf "\n\n  ${GOLD}${BOLD}Server Controls${RST}\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${WHITE}1)${RST} Server status\n"
+        printf "  ${WHITE}2)${RST} Start server\n"
+        printf "  ${WHITE}3)${RST} Stop server\n"
+        printf "  ${WHITE}4)${RST} Restart server\n"
+        printf "  ${WHITE}5)${RST} View logs\n"
+        printf "  ${WHITE}6)${RST} Attach to console\n"
+        printf "  ${WHITE}7)${RST} Server maintenance\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${DIM}  [ENTER] Back${RST}\n"
+        local _tlines; _tlines=$_TERM_LINES
+        if ! _read_menu_input "$(( _tlines - 1 ))"; then
+            local _read_rc=$?
+            [ "$_read_rc" -eq 2 ] && continue
+            return
+        fi
+        local choice="${_MENU_INPUT,,}"
+        case "$choice" in
+            1)  server_status; press_enter ;;
+            2)  server_start; press_enter ;;
+            3)  server_stop; press_enter ;;
+            4)  server_restart; press_enter ;;
+            5)  with_full_screen server_logs ;;
+            6)  with_full_screen server_attach ;;
+            7)  menu_server_maintenance ;;
+            "")  return ;;
+            *)  print_warning "Enter 1–7 or ENTER to go back."; press_enter ;;
+        esac
+    done
+}
 main_menu() {
     _IN_MENU=true
     _setup_screen
@@ -5772,47 +6949,15 @@ main_menu() {
     while true; do
         _RESIZE_NEEDED=false
         _setup_screen
-        refresh_container_names
-        local state_str build_str
-        if container_running "$WORLD_CONTAINER"; then
-            state_str="${GREEN}● Running${RST}"
-        else
-            state_str="${DIM}○ Stopped${RST}"
-        fi
-        if [ "$SERVER_TYPE" = "playerbots" ]; then
-            build_str="${GREEN}source${RST}"
-        else
-            build_str="${YELLOW}prebuilt${RST}"
-        fi
-
-        # Clear from menu area downward, then print single-column menu
         print_header
-
-        printf "  ${WHITE}Server:${RST} ${CYAN}%s${RST}  ${GOLD}✦${RST}  ${WHITE}State:${RST} %b  ${GOLD}✦${RST}  ${WHITE}Build:${RST} %b\n" \
-            "$(basename "$SERVER_DIR")" "$state_str" "$build_str"
-        printf "\n  ${GOLD}${BOLD}Server Modifications${RST}\n"
+        print_install_info
+        printf "\n\n  ${GOLD}${BOLD}Sub-Menus${RST}\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
-        printf "  ${WHITE}1)${RST} Manage AzerothCore Modules\n"
-        printf "  ${WHITE}2)${RST} Manage ALE Lua Mods\n"
-        printf "  ${WHITE}3)${RST} Manage SQL Mods\n"
-        printf "  ${WHITE}4)${RST} Configure AH Bot\n"
-        printf "  ${WHITE}5)${RST} Configure ALE\n"
-        printf "  ${WHITE}6)${RST} Configure Modules\n"
-        printf "  ${WHITE}7)${RST} Rebuild worldserver\n"
-        printf "\n  ${GOLD}${BOLD}Server Controls${RST}\n"
-        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
-        printf "  ${WHITE}8)${RST} Server status\n"
-        printf "  ${WHITE}9)${RST} Start server\n"
-        printf "  ${WHITE}10)${RST} Stop server\n"
-        printf "  ${WHITE}11)${RST} Restart server\n"
-        printf "  ${WHITE}12)${RST} View logs\n"
-        printf "  ${WHITE}13)${RST} Attach to console\n"
-        printf "  ${WHITE}14)${RST} Server maintenance\n"
-        printf "  ${WHITE}15)${RST} View In-Game Commands\n"
+        printf "  ${WHITE}1)${RST} Configurations\n"
+        printf "  ${WHITE}2)${RST} Server Modifications\n"
+        printf "  ${WHITE}3)${RST} Server Controls\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${GOLD} Q)${RST} Quit\n"
-
-        # Input at second-to-last terminal row so it's always visible
         local _tlines; _tlines=$_TERM_LINES
         local _irow=$(( _tlines - 1 ))
         if ! _read_menu_input "$_irow"; then
@@ -5821,23 +6966,10 @@ main_menu() {
             return
         fi
         local choice="${_MENU_INPUT,,}"
-
         case "$choice" in
-            1)  menu_modules ;;
-            2)  menu_ale_scripts ;;
-            3)  menu_sql_mods ;;
-            4)  configure_ahbot; press_enter ;;
-            5)  configure_ale; press_enter ;;
-            6)  menu_module_management ;;
-            7)  rebuild_worldserver; press_enter ;;
-            8)  server_status; press_enter ;;
-            9)  server_start; press_enter ;;
-            10) server_stop; press_enter ;;
-            11) server_restart; press_enter ;;
-            12) with_full_screen server_logs ;;
-            13) with_full_screen server_attach ;;
-            14) menu_server_maintenance ;;
-            15) show_ingame_commands ;;
+            1)  menu_configuration ;;
+            2)  menu_server_modifications ;;
+            3)  menu_server_controls ;;
             q)  echo ""; print_info "Goodbye!"; exit 0 ;;
         esac
     done
@@ -5882,7 +7014,6 @@ sync_ingame_commands_for_installed() {
 # ─────────────────────────────────────────────────────────────
 # ENTRYPOINT
 # ─────────────────────────────────────────────────────────────
-
 
 start_logo_animation
 detect_install
