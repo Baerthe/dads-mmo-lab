@@ -1064,66 +1064,76 @@ detect_wow_client() {
         fi
     fi
     print_step "Detecting WoW client install"
-    local -a _paths=(
-        "$HOME/.steam/steam/steamapps/common/World of Warcraft"
-        "$HOME/.steam/steam/steamapps/common/wow wotlk"
-        "$HOME/.steam/steam/steamapps/common/wotlk"
-        "$HOME/.steam/steam/steamapps/common/ChromieCraft_3.3.5a"
-        "$HOME/.steam/steam/steamapps/common/wow 3.3.5a"
-        "$HOME/.steam/steam/steamapps/common/wow-client-3.3.5a"
-        "$HOME/Steam/steamapps/common/World of Warcraft"
-        "$HOME/Steam/steamapps/common/wow wotlk"
-        "$HOME/Steam/steamapps/common/wotlk"
-        "$HOME/Steam/steamapps/common/ChromieCraft_3.3.5a"
-        "$HOME/Steam/steamapps/common/wow 3.3.5a"
-        "$HOME/Steam/steamapps/common/wow-client-3.3.5a"
-        "$HOME/.local/share/Steam/steamapps/common/World of Warcraft"
-        "$HOME/.local/share/Steam/steamapps/common/wow wotlk"
-        "$HOME/.local/share/Steam/steamapps/common/wotlk"
-        "$HOME/.local/share/Steam/steamapps/common/ChromieCraft_3.3.5a"
-        "$HOME/.local/share/Steam/steamapps/common/wow 3.3.5a"
-        "$HOME/.local/share/Steam/steamapps/common/wow-client-3.3.5a"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/World of Warcraft"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wow wotlk"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wotlk"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/ChromieCraft_3.3.5a"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wow 3.3.5a"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wow-client-3.3.5a"
-        "$HOME/wow-client"
-        "$HOME/wow-wotlk-client"
-        "$HOME/wow-client-3.3.5a"
+    # Known parent directories that may contain a WoW client as a subdirectory
+    local -a _parent_dirs=(
+        "$HOME/.steam/steam/steamapps/common"
+        "$HOME/Steam/steamapps/common"
+        "$HOME/.local/share/Steam/steamapps/common"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common"
         "$HOME/wow wotlk"
-        "$HOME/wotlk"
-        "$HOME/ChromieCraft_3.3.5a"
-        "$HOME/wow 3.3.5a"
-        "$HOME/Games/World of Warcraft"
-        "$HOME/Games/wow wotlk"
-        "$HOME/Games/wotlk"
-        "$HOME/Games/ChromieCraft_3.3.5a"
-        "$HOME/Games/wow 3.3.5a"
-        "$HOME/Games/wow-client-3.3.5a"
+        "$HOME/Games"
+        "$HOME"
     )
-    local p
-    for p in "${_paths[@]}"; do
-        if [ -d "$p" ] && \
-            ( [ -f "$p/Wow.exe" ] || [ -f "$p/wow.exe" ] || \
-              [ -f "$p/WowT.exe" ] || [ -d "$p/Interface" ] ); then
-            WOW_CLIENT_DIR="$p"
-            print_success "WoW client found: $WOW_CLIENT_DIR"
-            echo "$WOW_CLIENT_DIR" > "$_cache"
-            return 0
-        fi
+    # Known exact client folder names (direct children of above parents, or absolute)
+    local -a _names=(
+        "World of Warcraft"
+        "wow wotlk"
+        "wotlk"
+        "ChromieCraft_3.3.5a"
+        "wow 3.3.5a"
+        "wow-client-3.3.5a"
+        "wow-client"
+        "wow-wotlk-client"
+    )
+    local _wow_heuristic='[ -f "$p/Wow.exe" ] || [ -f "$p/wow.exe" ] || [ -f "$p/WowT.exe" ] || [ -d "$p/Interface" ]'
+    local pd n p
+    # 1) Scan every parent × name combination
+    for pd in "${_parent_dirs[@]}"; do
+        [ -d "$pd" ] || continue
+        for n in "${_names[@]}"; do
+            p="$pd/$n"
+            if [ -d "$p" ] && \
+                ( [ -f "$p/Wow.exe" ] || [ -f "$p/wow.exe" ] || \
+                  [ -f "$p/WowT.exe" ] || [ -d "$p/Interface" ] ); then
+                WOW_CLIENT_DIR="$p"
+                print_success "WoW client found: $WOW_CLIENT_DIR"
+                echo "$WOW_CLIENT_DIR" > "$_cache"
+                return 0
+            fi
+        done
     done
-    print_warning "WoW client not found automatically. Paths checked:"
-    for p in "${_paths[@]}"; do print_info "  $p"; done
+    # 2) Broad scan: any subdir of parent dirs that looks like a WoW install
+    for pd in "${_parent_dirs[@]}"; do
+        [ -d "$pd" ] || continue
+        local sub
+        while IFS= read -r sub; do
+            p="$pd/$sub"
+            if [ -d "$p" ] && \
+                ( [ -f "$p/Wow.exe" ] || [ -f "$p/wow.exe" ] || \
+                  [ -f "$p/WowT.exe" ] || [ -d "$p/Interface" ] ); then
+                WOW_CLIENT_DIR="$p"
+                print_success "WoW client found: $WOW_CLIENT_DIR"
+                echo "$WOW_CLIENT_DIR" > "$_cache"
+                return 0
+            fi
+        done < <(ls -1 "$pd" 2>/dev/null)
+    done
+    print_warning "WoW client not found automatically."
     echo ""
     printf "${WHITE}Enter full path to WoW client folder (leave blank to skip): ${RST}"
     read -r _manual
+    # Expand ~ and strip surrounding quotes the user may have typed
+    _manual="${_manual#\"}" ; _manual="${_manual%\"}"
+    _manual="${_manual#\'}" ; _manual="${_manual%\'}"
+    _manual="${_manual/#\~/$HOME}"
     if [ -n "$_manual" ] && [ -d "$_manual" ]; then
         WOW_CLIENT_DIR="$_manual"
         echo "$WOW_CLIENT_DIR" > "$_cache"
         print_success "WoW client set to: $WOW_CLIENT_DIR"
         return 0
+    elif [ -n "$_manual" ]; then
+        print_warning "Directory not found: $_manual"
+        print_info "Check the path and try again via option 16 in the main menu."
     fi
     print_warning "WoW client path not set — addon and client data auto-install skipped."
     return 1
@@ -2354,6 +2364,32 @@ copy_client_interface() {
     fi
 }
 
+# Interactive: set or change the WoW client folder.
+# Called from the main menu (option 16) and optionally from first-run.
+configure_wow_client() {
+    echo ""
+    print_step "WoW Client Folder"
+    if [ -n "$WOW_CLIENT_DIR" ]; then
+        echo -e "${WHITE}Current client path:${RST}  ${CYAN}$WOW_CLIENT_DIR${RST}"
+        echo ""
+        if ! ask_yes_no "Detect/change the WoW client folder?"; then
+            return 0
+        fi
+    fi
+    # Clear cached value so detect_wow_client re-probes
+    WOW_CLIENT_DIR=""
+    local _cache="$SERVER_DIR/.wow_client_dir"
+    rm -f "$_cache" 2>/dev/null
+    if detect_wow_client; then
+        echo ""
+        print_success "WoW client folder set to: $WOW_CLIENT_DIR"
+        echo -e "${DIM}Path saved — addon auto-install will use this location.${RST}"
+    else
+        echo ""
+        print_warning "No WoW client folder set. Addon auto-install will offer manual paths."
+    fi
+}
+
 # ── Per-script post-install configuration ────────────────────
 
 configure_ale_battlepass() {
@@ -3305,7 +3341,7 @@ ale_script_install() {
     mkdir -p "$SERVER_DIR/ale_scripts"
     if ale_script_is_installed "$key"; then
         print_info "Already cloned — pulling latest..."
-        (cd "$clone_dir" && git pull --depth 1 2>/dev/null) || \
+        (cd "$clone_dir" && git pull --depth=1 origin HEAD --quiet 2>/dev/null) || \
             print_warning "git pull failed — using existing copy"
     else
         if [ -d "$clone_dir" ] && [ ! -d "$clone_dir/.git" ]; then
@@ -3313,38 +3349,28 @@ ale_script_install() {
             rm -rf "$clone_dir"
         fi
         case "$key" in
-            sod)
-                # sod lives in a subdirectory of the main dads-mmo-lab repo.
-                # Use sparse checkout so only that subfolder is fetched.
-                if ! git clone --depth 1 --filter=blob:none --sparse \
-                        "$url" "$clone_dir"; then
+            sod|exchangenpc)
+                # Lives in a subdirectory of dads-mmo-lab — sparse checkout only that folder.
+                local _sparse_path
+                case "$key" in
+                    sod)         _sparse_path="guides/wow-wotlk/ALE-Pub/SeasonOfDiscovery" ;;
+                    exchangenpc) _sparse_path="guides/wow-wotlk/ALE-Pub/ExchangeNPC" ;;
+                esac
+                mkdir -p "$clone_dir"
+                if ! git -C "$clone_dir" init -q || \
+                   ! git -C "$clone_dir" remote add origin "$url"; then
                     rm -rf "$clone_dir"
                     print_error "Clone failed for $name!"
                     return 1
                 fi
-                (cd "$clone_dir" && \
-                    git sparse-checkout set \
-                        "guides/wow-wotlk/ALE-Pub/SeasonOfDiscovery") || {
+                git -C "$clone_dir" config core.sparseCheckout true
+                mkdir -p "$clone_dir/.git/info"
+                printf '%s/\n' "$_sparse_path" > "$clone_dir/.git/info/sparse-checkout"
+                if ! git -C "$clone_dir" pull --depth=1 origin HEAD --quiet; then
                     rm -rf "$clone_dir"
-                    print_error "Sparse checkout failed for $name!"
-                    return 1
-                }
-                ;;
-            exchangenpc)
-                # exchangenpc lives in ALE-Pub/ExchangeNPC in the main dads-mmo-lab repo.
-                if ! git clone --depth 1 --filter=blob:none --sparse \
-                        "$url" "$clone_dir"; then
-                    rm -rf "$clone_dir"
-                    print_error "Clone failed for $name!"
+                    print_error "Sparse fetch failed for $name!"
                     return 1
                 fi
-                (cd "$clone_dir" && \
-                    git sparse-checkout set \
-                        "guides/wow-wotlk/ALE-Pub/ExchangeNPC") || {
-                    rm -rf "$clone_dir"
-                    print_error "Sparse checkout failed for $name!"
-                    return 1
-                }
                 ;;
             *)
                 if ! git clone --depth 1 "$url" "$clone_dir"; then
@@ -5686,6 +5712,19 @@ show_first_run_welcome() {
     echo -e "${DIM}This welcome shows once per install. The marker file at${RST}"
     echo -e "${DIM}$marker tracks this.${RST}"
     echo ""
+    # Offer client folder detection on first run
+    echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
+    echo -e "${WHITE}${BOLD} WoW Client Folder${RST}"
+    echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
+    echo -e "${WHITE}Some mods include WoW client addons. Detecting your client${RST}"
+    echo -e "${WHITE}folder now lets the manager auto-install them for you.${RST}"
+    echo ""
+    if ask_yes_no "Detect WoW client folder now? (can skip and do later via option 16)"; then
+        detect_wow_client || true
+    else
+        print_info "You can set this anytime from the main menu → option 16."
+    fi
+    echo ""
     press_enter
 
     # Drop the marker — silent failure is OK, the welcome just shows again next time
@@ -6041,7 +6080,7 @@ main_menu() {
         printf "  ${WHITE}4)${RST} Configure AH Bot\n"
         printf "  ${WHITE}5)${RST} Configure ALE\n"
         printf "  ${WHITE}6)${RST} Configure Modules\n"
-        printf "  ${WHITE}7)${RST} Rebuild worldserver\n"
+        printf "  ${WHITE}7)${RST} Rebuild Worldserver\n"
         printf "\n  ${GOLD}${BOLD}Server Controls${RST}\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${WHITE}8)${RST} Server status\n"
@@ -6052,6 +6091,7 @@ main_menu() {
         printf "  ${WHITE}13)${RST} Attach to console\n"
         printf "  ${WHITE}14)${RST} Server maintenance\n"
         printf "  ${WHITE}15)${RST} View In-Game Commands\n"
+        printf "  ${WHITE}16)${RST} Set WoW Client Folder\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${GOLD} Q)${RST} Quit\n"
 
@@ -6081,6 +6121,7 @@ main_menu() {
             13) with_full_screen server_attach ;;
             14) menu_server_maintenance ;;
             15) show_ingame_commands ;;
+            16) configure_wow_client; press_enter ;;
             q)  echo ""; print_info "Goodbye!"; exit 0 ;;
         esac
     done
