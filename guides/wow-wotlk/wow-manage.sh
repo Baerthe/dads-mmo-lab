@@ -325,6 +325,33 @@ print_header() {
     printf '\033[%d;1H\033[J' "$MENU_START_ROW"
 }
 
+print_install_info() {
+    refresh_container_names
+    local state_str build_str _client_str
+    if container_running "$WORLD_CONTAINER"; then
+        state_str="${GREEN}● Running${RST}"
+    else
+        state_str="${DIM}○ Stopped${RST}"
+    fi
+    if [ "$SERVER_TYPE" = "playerbots" ]; then
+        build_str="${GREEN}source${RST}"
+    else
+        build_str="${YELLOW}prebuilt${RST}"
+    fi
+    printf "  ${WHITE}Server:${RST} ${CYAN}%s${RST}  ${GOLD}✦${RST}  ${WHITE}State:${RST} %b  ${GOLD}✦${RST}  ${WHITE}Build:${RST} %b\n" \
+        "$(basename "$SERVER_DIR")" "$state_str" "$build_str"
+    local _client_cache="$SERVER_DIR/.wow_client_dir"
+    if [ -n "$WOW_CLIENT_DIR" ]; then
+        _client_str="${GREEN}● Set${RST}  ${DIM}$(basename "$WOW_CLIENT_DIR")${RST}"
+    elif [ -f "$_client_cache" ] && [ -d "$(cat "$_client_cache")" ]; then
+        WOW_CLIENT_DIR=$(cat "$_client_cache")
+        _client_str="${GREEN}● Set${RST}  ${DIM}$(basename "$WOW_CLIENT_DIR")${RST}"
+    else
+        _client_str="${DIM}○ Not set${RST}"
+    fi
+    printf "  ${WHITE}WoW Client:${RST} %b  ${GOLD}✦${RST}  ${WHITE}Version:${RST} ${DIM}WotLK 3.3.5a${RST}\n" "$_client_str"
+}
+
 print_step()    { echo ""; echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
                     echo -e "${WHITE}${BOLD} $1${RST}"
                     echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"; }
@@ -6304,6 +6331,113 @@ _maintenance_import() {
     press_enter
 }
 
+menu_configuration() {
+    while true; do
+        if [ "$_RESIZE_NEEDED" = true ]; then
+            _RESIZE_NEEDED=false
+            _setup_screen
+        fi
+        print_header
+        print_install_info
+        printf "\n\n  ${GOLD}${BOLD}Configuration${RST}\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${WHITE}C)${RST} Set WoW Client Folder\n"
+        printf "  ${WHITE}1)${RST} Configure AH Bot\n"
+        printf "  ${WHITE}2)${RST} Configure ALE\n"
+        printf "  ${WHITE}3)${RST} Configure Modules\n"
+        printf "  ${WHITE}4)${RST} View In-Game Commands\n"
+        printf "  ${WHITE}5)${RST} Rebuild Worldserver\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${DIM}  [ENTER] Back${RST}\n"
+        local _tlines; _tlines=$_TERM_LINES
+        if ! _read_menu_input "$(( _tlines - 1 ))"; then
+            local _read_rc=$?
+            [ "$_read_rc" -eq 2 ] && continue
+            return
+        fi
+        local choice="${_MENU_INPUT,,}"
+        case "$choice" in
+            c)  configure_wow_client; press_enter ;;
+            1)  configure_ahbot; press_enter ;;
+            2)  configure_ale; press_enter ;;
+            3)  menu_module_management ;;
+            4)  show_ingame_commands ;;
+            5)  rebuild_worldserver; press_enter ;;
+            "")  return ;;
+            *)  print_warning "Enter C, 1–5 or ENTER to go back."; press_enter ;;
+        esac
+    done
+}
+menu_server_modifications() {
+    while true; do
+        if [ "$_RESIZE_NEEDED" = true ]; then
+            _RESIZE_NEEDED=false
+            _setup_screen
+        fi
+        print_header
+        print_install_info
+        printf "\n\n  ${GOLD}${BOLD}Server Modifications${RST}\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${WHITE}1)${RST} Manage AzerothCore Modules\n"
+        printf "  ${WHITE}2)${RST} Manage ALE Lua Mods\n"
+        printf "  ${WHITE}3)${RST} Manage SQL Mods\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${DIM}  [ENTER] Back${RST}\n"
+        local _tlines; _tlines=$_TERM_LINES
+        if ! _read_menu_input "$(( _tlines - 1 ))"; then
+            local _read_rc=$?
+            [ "$_read_rc" -eq 2 ] && continue
+            return
+        fi
+        local choice="${_MENU_INPUT,,}"
+        case "$choice" in
+            1)  menu_modules ;;
+            2)  menu_ale_scripts ;;
+            3)  menu_sql_mods ;;
+            "")  return ;;
+            *)  print_warning "Enter 1–3 or ENTER to go back."; press_enter ;;
+        esac
+    done
+}
+menu_server_controls() {
+    while true; do
+        if [ "$_RESIZE_NEEDED" = true ]; then
+            _RESIZE_NEEDED=false
+            _setup_screen
+        fi
+        print_header
+        print_install_info
+        printf "\n\n  ${GOLD}${BOLD}Server Controls${RST}\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${WHITE}1)${RST} Server status\n"
+        printf "  ${WHITE}2)${RST} Start server\n"
+        printf "  ${WHITE}3)${RST} Stop server\n"
+        printf "  ${WHITE}4)${RST} Restart server\n"
+        printf "  ${WHITE}5)${RST} View logs\n"
+        printf "  ${WHITE}6)${RST} Attach to console\n"
+        printf "  ${WHITE}7)${RST} Server maintenance\n"
+        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${DIM}  [ENTER] Back${RST}\n"
+        local _tlines; _tlines=$_TERM_LINES
+        if ! _read_menu_input "$(( _tlines - 1 ))"; then
+            local _read_rc=$?
+            [ "$_read_rc" -eq 2 ] && continue
+            return
+        fi
+        local choice="${_MENU_INPUT,,}"
+        case "$choice" in
+            1)  server_status; press_enter ;;
+            2)  server_start; press_enter ;;
+            3)  server_stop; press_enter ;;
+            4)  server_restart; press_enter ;;
+            5)  with_full_screen server_logs ;;
+            6)  with_full_screen server_attach ;;
+            7)  menu_server_maintenance ;;
+            "")  return ;;
+            *)  print_warning "Enter 1–7 or ENTER to go back."; press_enter ;;
+        esac
+    done
+}
 main_menu() {
     _IN_MENU=true
     _setup_screen
@@ -6311,59 +6445,15 @@ main_menu() {
     while true; do
         _RESIZE_NEEDED=false
         _setup_screen
-        refresh_container_names
-        local state_str build_str
-        if container_running "$WORLD_CONTAINER"; then
-            state_str="${GREEN}● Running${RST}"
-        else
-            state_str="${DIM}○ Stopped${RST}"
-        fi
-        if [ "$SERVER_TYPE" = "playerbots" ]; then
-            build_str="${GREEN}source${RST}"
-        else
-            build_str="${YELLOW}prebuilt${RST}"
-        fi
-
-        # Clear from menu area downward, then print single-column menu
         print_header
-
-        printf "  ${WHITE}Server:${RST} ${CYAN}%s${RST}  ${GOLD}✦${RST}  ${WHITE}State:${RST} %b  ${GOLD}✦${RST}  ${WHITE}Build:${RST} %b\n" \
-            "$(basename "$SERVER_DIR")" "$state_str" "$build_str"
-        local _client_cache="$SERVER_DIR/.wow_client_dir"
-        local _client_str
-        if [ -n "$WOW_CLIENT_DIR" ]; then
-            _client_str="${GREEN}● Set${RST}  ${DIM}$(basename "$WOW_CLIENT_DIR")${RST}"
-        elif [ -f "$_client_cache" ] && [ -d "$(cat "$_client_cache")" ]; then
-            WOW_CLIENT_DIR=$(cat "$_client_cache")
-            _client_str="${GREEN}● Set${RST}  ${DIM}$(basename "$WOW_CLIENT_DIR")${RST}"
-        else
-            _client_str="${DIM}○ Not set${RST}"
-        fi
-        printf "  ${WHITE}WoW Client:${RST} %b  ${GOLD}✦${RST}  ${WHITE}Version:${RST} ${DIM}WotLK 3.3.5a${RST}\n" "$_client_str"
-        printf "\n  ${GOLD}${BOLD}Server Modifications${RST}\n"
-        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
-        printf "  ${WHITE}C)${RST} Set WoW Client Folder\n"
-        printf "  ${WHITE}1)${RST} Manage AzerothCore Modules\n"
-        printf "  ${WHITE}2)${RST} Manage ALE Lua Mods\n"
-        printf "  ${WHITE}3)${RST} Manage SQL Mods\n"
-        printf "  ${WHITE}4)${RST} Configure AH Bot\n"
-        printf "  ${WHITE}5)${RST} Configure ALE\n"
-        printf "  ${WHITE}6)${RST} Configure Modules\n"
-        printf "  ${WHITE}7)${RST} Rebuild Worldserver\n"
-        printf "\n  ${GOLD}${BOLD}Server Controls${RST}\n"
-        printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
-        printf "  ${WHITE}8)${RST} Server status\n"
-        printf "  ${WHITE}9)${RST} Start server\n"
-        printf "  ${WHITE}10)${RST} Stop server\n"
-        printf "  ${WHITE}11)${RST} Restart server\n"
-        printf "  ${WHITE}12)${RST} View logs\n"
-        printf "  ${WHITE}13)${RST} Attach to console\n"
-        printf "  ${WHITE}14)${RST} Server maintenance\n"
-        printf "  ${WHITE}15)${RST} View In-Game Commands\n"
+        print_install_info
+        printf "\n\n  ${GOLD}${BOLD}Sub-Menus${RST}\n"
+        printf "\n  ${GOLD}──────────────────────────────────────────────────${RST}\n"
+        printf "  ${WHITE}1)${RST} Configuration\n"
+        printf "  ${WHITE}2)${RST} Server Modifications\n"
+        printf "  ${WHITE}3)${RST} Server Controls\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${GOLD} Q)${RST} Quit\n"
-
-        # Input at second-to-last terminal row so it's always visible
         local _tlines; _tlines=$_TERM_LINES
         local _irow=$(( _tlines - 1 ))
         if ! _read_menu_input "$_irow"; then
@@ -6372,24 +6462,10 @@ main_menu() {
             return
         fi
         local choice="${_MENU_INPUT,,}"
-
         case "$choice" in
-            c) configure_wow_client; press_enter ;;
-            1)  menu_modules ;;
-            2)  menu_ale_scripts ;;
-            3)  menu_sql_mods ;;
-            4)  configure_ahbot; press_enter ;;
-            5)  configure_ale; press_enter ;;
-            6)  menu_module_management ;;
-            7)  rebuild_worldserver; press_enter ;;
-            8)  server_status; press_enter ;;
-            9)  server_start; press_enter ;;
-            10) server_stop; press_enter ;;
-            11) server_restart; press_enter ;;
-            12) with_full_screen server_logs ;;
-            13) with_full_screen server_attach ;;
-            14) menu_server_maintenance ;;
-            15) show_ingame_commands ;;
+            1)  menu_configuration ;;
+            2)  menu_server_modifications ;;
+            3)  menu_server_controls ;;
             q)  echo ""; print_info "Goodbye!"; exit 0 ;;
         esac
     done
