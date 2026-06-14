@@ -16,7 +16,7 @@ DELETE FROM `creature_template` WHERE `entry` = 2069430;
 INSERT INTO `creature_template`
   (`entry`, `name`, `subname`, `gossip_menu_id`,
    `minlevel`, `maxlevel`, `exp`, `faction`, `npcflag`,
-   `speed_walk`, `speed_run`, `scale`, `rank`,
+   `speed_walk`, `speed_run`, `rank`,
    `dmgschool`, `DamageModifier`,
    `BaseAttackTime`, `RangeAttackTime`,
    `BaseVariance`, `RangeVariance`,
@@ -27,7 +27,7 @@ INSERT INTO `creature_template`
 VALUES
   (2069430, 'Black Market Broker', 'Rare Goods & Services', 0,
    80, 80, 0, 35, 1,
-   1.0, 1.14286, 1.0, 0,
+   1.0, 1.14286, 0,
    0, 1.0,
    2000, 2000,
    1.0, 1.0,
@@ -35,6 +35,17 @@ VALUES
    7, '', 0, 1.0,
    1.0, 1.0, 1.0,
    1, 2, 0);
+
+-- ── 1b. Scale — schema-adaptive (column removed in some AC builds) ────────────────
+SET @hasScale = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'creature_template' AND COLUMN_NAME = 'scale'
+);
+SET @sql = IF(@hasScale > 0,
+  'UPDATE creature_template SET scale = 1.0 WHERE entry = 2069430',
+  'SELECT ''Skipping scale — column not present in this AC build'' AS note'
+);
+PREPARE _bmah_stmt FROM @sql; EXECUTE _bmah_stmt; DEALLOCATE PREPARE _bmah_stmt;
 
 -- ── 2. Display model — schema-adaptive ───────────────────────────────────────────
 -- Newer AC (no modelid columns): insert into creature_template_model.
