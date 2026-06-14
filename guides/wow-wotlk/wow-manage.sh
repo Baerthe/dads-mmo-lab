@@ -3610,6 +3610,16 @@ ale_deploy_lua_files() {
             if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
                 count=$(ls "$clone_dir"/*.lua 2>/dev/null | wc -l | tr -d ' ')
                 print_success "Deployed $count file(s) → lua_scripts/"
+                # Patch: add playerbot guard so bots are skipped in OnLevelChange.
+                # Without this, the level-brackets module fires hundreds of OnLevelChange
+                # events during bot AI init, each triggering two synchronous WorldDBQuery
+                # calls + AddItem — causing a silent crash on every server start.
+                local _lr="$lua_dir/levelreward.lua"
+                if [ -f "$_lr" ]; then
+                    awk '/    if not player then return end/{print; print "    if player:IsBot() then return end"; next} 1' \
+                        "$_lr" > "$_lr.tmp" && mv "$_lr.tmp" "$_lr"
+                    print_success "Patched levelreward.lua: added playerbot guard (player:IsBot())."
+                fi
             else
                 print_warning "No .lua files found in clone root — check $clone_dir"
             fi
