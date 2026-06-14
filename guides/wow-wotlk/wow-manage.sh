@@ -1636,86 +1636,137 @@ show_module_tracking() {
     fi
 }
 
-# Repair flow for a single module — clear its tracking rows.
-# Tries the known filename list first, then offers auto-discovery from
-# the module's SQL directory, then offers manual filename entry.
+# Compute SHA1 hash of a SQL file the same way AC's UpdateFetcher does.
+# Returns uppercase hex string; empty string on failure.
+compute_sql_hash() {
+    local file="$1"
+    if command -v sha1sum >/dev/null 2>&1; then
+        sha1sum "$file" 2>/dev/null | awk '{print toupper($1)}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 1 "$file" 2>/dev/null | awk '{print toupper($1)}'
+    else
+        # Fall back to computing inside the DB container
+        local bname; bname=$(basename "$file")
+        docker cp "$file" "$DB_CONTAINER:/tmp/$bname" 2>/dev/null
+        docker exec "$DB_CONTAINER" sha1sum "/tmp/$bname" 2>/dev/null \
+            | awk '{print toupper($1)}'
+        docker exec "$DB_CONTAINER" rm -f "/tmp/$bname" 2>/dev/null
+    fi
+}
+# Insert or update the updates-table row for a SQL file so AC will skip it.
+# Use this when the table already exists in the DB but AC has no record of
+# the file — which causes ac-db-import to fail with "Table X already exists".
+mark_sql_applied() {
+    local db_full="$1" sql_filename="$2"
+    local sql_file
+    sql_file=$(find "$SERVER_DIR/modules" -name "$sql_filename" 2>/dev/null | head -1)
+    if [ -z "$sql_file" ]; then
+        print_error "Cannot find '$sql_filename' in $SERVER_DIR/modules"
+        return 1
+    fi
+    local hash; hash=$(compute_sql_hash "$sql_file")
+    if [ -z "$hash" ]; then
+        print_error "Could not compute hash for $sql_filename"
+        return 1
+    fi
+    print_info "  File: $sql_file"
+    print_info "  Hash: ${hash:0:7}... (SHA1)"
+    docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" \
+        "$db_full" \
+        -e "INSERT INTO updates (name, hash, state, timestamp, speed)
+            VALUES ('$sql_filename', '$hash', 'RELEASED', NOW(), 0)
+            ON DUPLICATE KEY UPDATE hash='$hash', state='RELEASED';" 2>/dev/null && \
+        echo -e "  ${GREEN}✓${RST} Marked as applied: $sql_filename" || \
+        { print_error "Failed to write to $db_full.updates"; return 1; }
+}
+# Repair flow for a single module.
+# Two modes:
+#   MARK   — inserts the file's hash into updates so AC skips it.
+#            Use when: table exists in DB but no/wrong tracking row.
+#            Symptom: ac-db-import "Table X already exists" AND the
+#            SQL file does NOT use CREATE TABLE IF NOT EXISTS.
+#   CLEAR  — deletes the tracking row so AC re-applies the SQL.
+#            Use when: the module SQL file changed (hash mismatch) AND
+#            the SQL uses CREATE TABLE IF NOT EXISTS / INSERT IGNORE.
 repair_module() {
     local key="$1" db_full="$2" known_files="$3"
-
     print_step "Repairing: $key"
     show_module_tracking "$key"
     echo ""
-
-    # Determine which SQL filenames to clear
-    local files_to_clear=""
-
-    # 1. Try the known list first
+    # Resolve file list (known → auto-discover → manual)
+    local files_to_fix=""
     if [ -n "$known_files" ]; then
-        echo -e "${WHITE}Known SQL files to clear from ${db_full}.updates:${RST}"
+        echo -e "${WHITE}Known SQL files for ${db_full}:${RST}"
         local f
-        for f in $known_files; do
-            echo -e "  ${CYAN}$f${RST}"
-        done
+        for f in $known_files; do echo -e "  ${CYAN}$f${RST}"; done
         echo ""
-        if ask_yes_no "Clear tracking rows for these files?"; then
-            files_to_clear="$known_files"
-        fi
+        if ask_yes_no "Use these files?"; then files_to_fix="$known_files"; fi
     fi
-
-    # 2. If no known list or user declined, offer auto-discovery
-    if [ -z "$files_to_clear" ]; then
-        # Map db_full back to db_short for the sql dir
+    if [ -z "$files_to_fix" ]; then
         local db_short="${db_full#acore_}"
-        local discovered
-        discovered=$(discover_module_sql_files "$key" "$db_short")
+        local discovered; discovered=$(discover_module_sql_files "$key" "$db_short")
         if [ -n "$discovered" ]; then
-            echo -e "${WHITE}Auto-discovered SQL files in module's sql dir:${RST}"
+            echo -e "${WHITE}Auto-discovered SQL files:${RST}"
             local f
-            for f in $discovered; do
-                echo -e "  ${CYAN}$f${RST}"
-            done
+            for f in $discovered; do echo -e "  ${CYAN}$f${RST}"; done
             echo ""
-            if ask_yes_no "Clear tracking rows for these auto-discovered files?"; then
-                files_to_clear="$discovered"
+            if ask_yes_no "Use these auto-discovered files?"; then
+                files_to_fix="$discovered"
             fi
         fi
     fi
-
-    # 3. Final fallback: manual entry
-    if [ -z "$files_to_clear" ]; then
+    if [ -z "$files_to_fix" ]; then
         echo ""
-        echo -e "${WHITE}Enter SQL filenames manually (space-separated)${RST}"
-        echo -e "${DIM}Example: foo.sql bar.sql${RST}"
-        echo -e "${DIM}Or just press ENTER to skip this module.${RST}"
+        echo -e "${WHITE}Enter SQL filenames manually (space-separated, ENTER to skip):${RST}"
         printf "${WHITE}Files: ${RST}"
-        read -r files_to_clear
-        [ -z "$files_to_clear" ] && { print_info "Skipped."; return 0; }
+        read -r files_to_fix
+        [ -z "$files_to_fix" ] && { print_info "Skipped."; return 0; }
     fi
-
-    # Apply the clears, report per-file
+    # Choose repair mode
     echo ""
-    local cleared=0 missing=0
+    echo -e "${WHITE}${BOLD}Choose repair mode:${RST}"
+    echo -e "  ${CYAN}M)${RST} Mark as applied   — table exists in DB, AC has no record of it"
+    echo -e "     ${DIM}(use when ac-db-import says 'Table X already exists')${RST}"
+    echo -e "  ${CYAN}C)${RST} Clear tracking    — force AC to re-apply the SQL on next start"
+    echo -e "     ${DIM}(safe only if the SQL uses CREATE TABLE IF NOT EXISTS / INSERT IGNORE)${RST}"
+    echo ""
+    local mode=""
+    while [ -z "$mode" ]; do
+        printf "${WHITE}Choice [M/C]: ${RST}"
+        read -r mode
+        case "${mode,,}" in
+            m) mode="mark" ;;
+            c) mode="clear" ;;
+            *) mode=""; echo "Please enter M or C." ;;
+        esac
+    done
+    echo ""
+    local ok=0 fail=0
     local f
-    for f in $files_to_clear; do
-        if clear_update_tracking_row "$db_full" "$f"; then
-            echo -e "  ${GREEN}✓${RST} Cleared: $f"
-            cleared=$((cleared + 1))
+    for f in $files_to_fix; do
+        if [ "$mode" = "mark" ]; then
+            mark_sql_applied "$db_full" "$f" && ok=$((ok + 1)) || fail=$((fail + 1))
         else
-            echo -e "  ${DIM}○${RST} Not found in updates: $f"
-            missing=$((missing + 1))
+            if clear_update_tracking_row "$db_full" "$f"; then
+                echo -e "  ${GREEN}✓${RST} Cleared: $f"
+                ok=$((ok + 1))
+            else
+                echo -e "  ${DIM}○${RST} Not found in updates: $f"
+                fail=$((fail + 1))
+            fi
         fi
     done
     echo ""
-    if [ "$cleared" -gt 0 ]; then
-        print_success "Cleared $cleared tracking row(s) for $key"
-        print_info "AzerothCore will re-apply this SQL on next server start."
+    if [ "$ok" -gt 0 ] && [ "$mode" = "mark" ]; then
+        print_success "$ok file(s) marked as applied — ac-db-import will skip them."
+        print_info "Restart the server now; no further SQL action needed."
+    elif [ "$ok" -gt 0 ]; then
+        print_success "Cleared $ok tracking row(s) — AC will re-apply SQL on next start."
     fi
-    if [ "$cleared" -eq 0 ] && [ "$missing" -gt 0 ]; then
-        print_info "All filenames searched were already absent from updates table."
-        print_info "This could mean:"
-        print_info "  • The filenames don't exactly match what AC tracked"
-        print_info "  • The module's SQL was never applied (fresh install case)"
-        print_info "  • The repair was already run successfully before"
+    if [ "$fail" -gt 0 ] && [ "$mode" = "mark" ]; then
+        print_warning "$fail file(s) could not be marked — check $SERVER_DIR/modules for the files."
+    elif [ "$fail" -gt 0 ]; then
+        print_info "$fail file(s) were not in the updates table (already clear or never tracked)."
     fi
 }
 
@@ -1727,14 +1778,16 @@ repair_install_state() {
     echo -e "${WHITE}  • ${CYAN}ERROR 1050: Table 'X' already exists${RST}"
     echo -e "${WHITE}  • ${CYAN}ac-db-import: didn't complete successfully: exit 1${RST}"
     echo ""
-    echo -e "${WHITE}${BOLD}How this works:${RST}"
-    echo -e "${WHITE}  This clears rows from AzerothCore's ${CYAN}updates${WHITE} tracking table${RST}"
-    echo -e "${WHITE}  for selected modules. On next server start, AC will detect${RST}"
-    echo -e "${WHITE}  the SQL files as needing application and run them. Module SQL${RST}"
-    echo -e "${WHITE}  uses IF NOT EXISTS semantics, so re-apply is safe even when${RST}"
-    echo -e "${WHITE}  the tables already exist.${RST}"
+    echo -e "${WHITE}${BOLD}Two repair modes (you choose per-module):${RST}"
+    echo -e "${WHITE}  ${CYAN}Mark as applied${RST}${WHITE} — inserts the file's hash so AC skips it.${RST}"
+    echo -e "${WHITE}    Use when: table already exists, no tracking row, SQL lacks IF NOT EXISTS.${RST}"
+    echo -e "${WHITE}    (e.g. mod-ah-bot's auctionhousebot_professionItems.sql)${RST}"
     echo ""
-    echo -e "${GREEN}This function does NOT drop tables — it's safe and non-destructive.${RST}"
+    echo -e "${WHITE}  ${CYAN}Clear tracking${RST}${WHITE} — deletes the row so AC re-applies the SQL.${RST}"
+    echo -e "${WHITE}    Use when: the SQL file changed (hash mismatch) and it uses${RST}"
+    echo -e "${WHITE}    CREATE TABLE IF NOT EXISTS / INSERT IGNORE semantics.${RST}"
+    echo ""
+    echo -e "${GREEN}Neither mode drops tables — both are safe and non-destructive.${RST}"
     echo ""
 
     # Need DB running
@@ -1851,7 +1904,7 @@ repair_install_state() {
     esac
 
     echo ""
-    print_info "Done. Start the server (menu option 9) for AC to re-apply cleared SQL."
+    print_info "Done. Restart the server (menu option 9) to apply changes."
 }
 
 # ─────────────────────────────────────────────────────────────
