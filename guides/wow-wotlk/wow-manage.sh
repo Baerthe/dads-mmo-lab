@@ -2212,8 +2212,10 @@ ale_run_sql_file() {
     if docker exec -i "$DB_CONTAINER" mysql \
         -uroot -p"$DB_ROOT_PASSWORD" "$db_name" < "$sql_file" 2>&1; then
         print_success "SQL applied: $(basename "$sql_file")"
+        return 0
     else
-        print_warning "SQL had errors — table may already exist, which is usually safe."
+        print_warning "SQL apply failed: $(basename "$sql_file") — check database logs."
+        return 1
     fi
 }
 
@@ -2299,36 +2301,72 @@ configure_ale_battlepass() {
 configure_ale_paragon() {
     local clone_dir
     clone_dir=$(ale_script_clone_dir "paragon")
+    local paragon_sql_dir="$clone_dir/sql"
 
     print_step "Paragon Anniversary — SQL Migrations Required"
     echo ""
-    echo -e "${WHITE}Paragon Anniversary requires SQL files to be applied BEFORE first startup.${RST}"
-    echo -e "${WHITE}Tables are NOT auto-created — you must run these migrations manually.${RST}"
+    echo -e "${WHITE}Paragon Anniversary requires SQL files applied BEFORE first startup.${RST}"
+    echo -e "${WHITE}Tables are NOT auto-created — you must run these migrations.${RST}"
     echo ""
     if ensure_db_running; then
-        local paragon_sql_dir="$clone_dir/sql"
-        local sql_files
-        sql_files=$(find "$paragon_sql_dir" -name "*.sql" 2>/dev/null | sort)
-        if [ -n "$sql_files" ]; then
-            print_info "Found SQL files in $paragon_sql_dir:"
-            echo "$sql_files" | while read -r f; do echo "    - $(basename "$f")"; done
+        # Collect schema migration files (numbered 0x_*.sql); exclude example/data files
+        local -a schema_files=()
+        local f
+        while IFS= read -r f; do
+            local bn; bn=$(basename "$f")
+            # Skip date-prefixed example data files (e.g. 11-13-2026_Example_Data.sql)
+            if [[ "$bn" =~ ^[0-9]{2}-[0-9]{2} ]] || [[ "$bn" =~ [Ee]xample ]]; then
+                continue
+            fi
+            schema_files+=("$f")
+        done < <(find "$paragon_sql_dir" -name "*.sql" 2>/dev/null | sort)
+
+        if [ "${#schema_files[@]}" -gt 0 ]; then
+            print_info "Schema migration files (in order):"
+            for f in "${schema_files[@]}"; do echo "    - $(basename "$f")"; done
             echo ""
-            if ask_yes_no "Apply all Paragon SQL files to acore_world now?"; then
-                echo "$sql_files" | while read -r f; do
-                    ale_run_sql_file "acore_world" "$f"
+            if ask_yes_no "Apply Paragon schema migrations now?"; then
+                # 01_create_database.sql creates the acore_ale DB — run via acore_world
+                local db_create="$paragon_sql_dir/01_create_database.sql"
+                if [ -f "$db_create" ]; then
+                    ale_run_sql_file "acore_world" "$db_create"
+                fi
+                # Remaining migrations run against acore_ale
+                for f in "${schema_files[@]}"; do
+                    [[ "$(basename "$f")" == "01_create_database.sql" ]] && continue
+                    ale_run_sql_file "acore_ale" "$f"
                 done
             else
-                print_warning "Apply SQL manually before starting the server:"
-                echo "$sql_files" | while read -r f; do
-                    print_info "  mysql acore_world < $f"
+                print_warning "Apply migrations manually before starting the server:"
+                print_info "  mysql acore_world < $paragon_sql_dir/01_create_database.sql"
+                for f in "${schema_files[@]}"; do
+                    [[ "$(basename "$f")" == "01_create_database.sql" ]] && continue
+                    print_info "  mysql acore_ale   < $f"
                 done
             fi
+            # Offer example/sample data separately
+            local example_file
+            example_file=$(find "$paragon_sql_dir" -name "*.sql" 2>/dev/null \
+                | grep -E '[0-9]{2}-[0-9]{2}|[Ee]xample' | sort | head -1)
+            if [ -n "$example_file" ]; then
+                echo ""
+                print_info "Optional example data: $(basename "$example_file")"
+                if ask_yes_no "Apply example data to acore_ale? (optional — safe to skip)"; then
+                    ale_run_sql_file "acore_ale" "$example_file"
+                fi
+            fi
         else
-            print_warning "No SQL files found in $paragon_sql_dir"
+            print_warning "No schema SQL files found in $paragon_sql_dir"
             print_info "Check the repo's sql/ directory and apply required migrations."
         fi
     else
-        print_warning "Database not available. Apply SQL files from $clone_dir/sql/ manually."
+        print_warning "Database not available. Apply SQL files manually:"
+        print_info "  mysql acore_world < $paragon_sql_dir/01_create_database.sql"
+        print_info "  mysql acore_ale   < $paragon_sql_dir/02_create_config_tables.sql"
+        print_info "  mysql acore_ale   < $paragon_sql_dir/03_create_experience_tables.sql"
+        print_info "  mysql acore_ale   < $paragon_sql_dir/04_create_paragon_tables.sql"
+        print_info "  mysql acore_ale   < $paragon_sql_dir/05_create_triggers.sql"
+        print_info "  mysql acore_ale   < $paragon_sql_dir/06_insert_default_config.sql"
     fi
 
     echo ""
@@ -3161,22 +3199,20 @@ ale_script_install() {
             print_info "00_AccountWideUtils.lua is required alongside all other Accountwide"
             print_info "scripts — it has been deployed with the rest in lua_scripts/accountwide/."
             echo ""
-            print_info "Accountwide requires a characters DB schema."
-            if ask_yes_no "Apply Accountwide characters SQL now?"; then
+            print_warning "Accountwide REQUIRES a characters DB schema — the system will not work without it."
+            if ask_yes_no "Apply Accountwide characters SQL now? (required)"; then
+                local sql_file="$clone_dir/sql/create_accountwide_tables.sql"
                 if ensure_db_running; then
-                    local sql_file="$clone_dir/sql/create_accountwide_tables.sql"
                     if [ -f "$sql_file" ]; then
                         ale_run_sql_file "acore_characters" "$sql_file"
                     else
-                        # Fallback: search for the file if name changed upstream
-                        local found
-                        found=$(find "$clone_dir/sql" -name "*.sql" 2>/dev/null | head -1)
-                        if [ -n "$found" ]; then
-                            ale_run_sql_file "acore_characters" "$found"
-                        else
-                            print_warning "SQL file not found in $clone_dir/sql/"
-                        fi
+                        print_warning "Expected SQL file not found: $sql_file"
+                        print_info "Locate create_accountwide_tables.sql in $clone_dir/sql/ and apply manually:"
+                        print_info "  mysql acore_characters < <path/to/create_accountwide_tables.sql>"
                     fi
+                else
+                    print_warning "Database not available. Apply SQL manually when DB is running:"
+                    print_info "  mysql acore_characters < $sql_file"
                 fi
             else
                 print_info "Apply manually: mysql acore_characters < $clone_dir/sql/create_accountwide_tables.sql"
@@ -3206,6 +3242,9 @@ ale_script_install() {
                         print_warning "SQL apply failed — check DB logs and retry or apply manually."
                         print_info "Manual: $_exc_sql_up"
                     fi
+                else
+                    print_warning "Database not available. Apply SQL manually when DB is running:"
+                    print_info "  mysql acore_world < $_exc_sql_up"
                 fi
             else
                 print_info "Skipped. Apply manually when ready:"
@@ -3224,12 +3263,14 @@ ale_script_install() {
             ;;
         battlepass)
             echo ""
-            if ask_yes_no "Configure Battle Pass SQL and settings now?"; then
+            print_warning "Battle Pass requires SQL applied before the server starts — tables must exist."
+            if ask_yes_no "Apply Battle Pass SQL and configure settings now?"; then
                 configure_ale_battlepass
             else
-                print_info "Run main menu option 5 (Configure ALE) to reconfigure Battle Pass later."
-                print_info "Remember to apply SQL manually from:"
-                print_info "  $clone_dir/sql/"
+                print_warning "SQL not applied. Apply manually before running the server:"
+                print_info "  acore_world:      $clone_dir/sql/battlepass_world.sql"
+                print_info "  acore_characters: $clone_dir/sql/battlepass_characters.sql"
+                print_info "Reconfigure anytime from the ALE Scripts menu → c on Battle Pass."
             fi
             echo ""
             print_info "Battle Pass Ticker (entry 90100) needs to be placed in the world."
@@ -3238,8 +3279,14 @@ ale_script_install() {
             ;;
         paragon)
             echo ""
-            if ask_yes_no "Show Paragon Anniversary configuration guide now?"; then
+            print_warning "Paragon Anniversary requires SQL migrations before first use — server will crash without them."
+            if ask_yes_no "Apply Paragon SQL migrations and view configuration guide now?"; then
                 configure_ale_paragon
+            else
+                print_warning "SQL not applied. Paragon will not function until these files are run:"
+                print_info "  Apply all .sql files (in order) from: $clone_dir/sql/"
+                print_info "  Note: 01_create_database.sql creates the acore_ale database."
+                print_info "Reconfigure anytime from the ALE Scripts menu → c on Paragon."
             fi
             ;;
         bmah)
