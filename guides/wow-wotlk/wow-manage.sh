@@ -1510,6 +1510,7 @@ server_attach() {
 # Format: "module-key|database|filename1.sql filename2.sql ..."
 declare -a MODULE_UPDATE_FILES=(
     "mod-ah-bot|acore_world|auctionhousebot_professionItems.sql mod_auctionhousebot.sql"
+    "mod-npc-beastmaster|acore_world|beastmaster_tames.sql beastmaster_tames_inserts.sql"
     "mod-transmog|acore_characters|trasmorg.sql"
     "mod-1v1-arena|acore_characters|"
     "mod-solocraft|acore_world|"
