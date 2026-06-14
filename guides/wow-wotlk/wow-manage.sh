@@ -2621,7 +2621,7 @@ configure_ale_battlepass() {
         ale_run_sql_file "acore_characters" "$clone_dir/sql/battlepass_characters.sql" && _bp_chars_ok=true
         # Create the Battle Pass vendor NPC (entry 90100) — not included in upstream SQL
         if [ "$_bp_world_ok" = true ]; then
-            fix_battlepass_npc
+            print_info "Battle Pass world SQL applied — NPC will be created at end of configure."
         fi
         if [ "$_bp_world_ok" = false ] || [ "$_bp_chars_ok" = false ]; then
             print_warning "Battle Pass install incomplete — one or more SQL files failed:"
@@ -3602,16 +3602,8 @@ ale_script_install() {
                 print_info "  acore_world:      $clone_dir/sql/battlepass_world.sql"
                 print_info "  acore_characters: $clone_dir/sql/battlepass_characters.sql"
                 print_info "Reconfigure anytime from the ALE Scripts menu → c on Battle Pass."
-            fi
-            echo ""
-            fix_battlepass_npc
-            echo ""
-            print_step "Battle Pass — Client Addon"
-            echo -e "${WHITE}Battle Pass includes a WoW client addon for the in-game UI.${RST}"
-            if ask_yes_no "Auto-install BattlePass addon to WoW client now?"; then
-                copy_client_addon "$clone_dir/BattlePass" "BattlePass" "BattlePass addon"
-            else
-                print_info "Manual: cp -r \"$clone_dir/BattlePass\" <WoW>/Interface/AddOns/BattlePass"
+                echo ""
+                fix_battlepass_npc
             fi
             echo ""
             print_info "Battle Pass Ticker (entry 90100) needs to be placed in the world."
@@ -6214,6 +6206,8 @@ fix_exchangenpc_npc() {
     fi
     local _exc_sql_err
     _exc_sql_err=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world 2>&1 <<'_EXCNPC_SQL'
+SET foreign_key_checks=0;
+SET sql_mode='';
 DELETE FROM `creature_template` WHERE `entry` IN (1116001,1116002,1116003);
 INSERT INTO `creature_template`
   (`entry`,`name`,`subname`,`gossip_menu_id`,`minlevel`,`maxlevel`,`exp`,`faction`,`npcflag`,
@@ -6246,14 +6240,17 @@ INSERT INTO `npc_text` (`ID`,`text0_0`,`BroadcastTextID0`,`lang0`,`Probability0`
 (92105,'I am offering Tokens for the most powerful gear, designed for combat against other heroes.',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1);
 DELETE FROM `creature_equip_template` WHERE `CreatureID` IN (1116001,1116002);
 INSERT INTO `creature_equip_template` (`CreatureID`,`ID`,`ItemID1`,`ItemID2`,`ItemID3`,`VerifiedBuild`) VALUES (1116002,1,18609,0,0,18019);
+SET foreign_key_checks=1;
 _EXCNPC_SQL
 )
-    if [ $? -ne 0 ]; then
+    local _exc_rc=$?
+    local _exc_errs; _exc_errs=$(echo "$_exc_sql_err" | grep -v "^mysql: \[Warning\]" | grep -v "^$")
+    if [ $_exc_rc -ne 0 ] || echo "$_exc_errs" | grep -qi "^ERROR"; then
         print_error "SQL apply failed:"
         echo "$_exc_sql_err"
         return 1
     fi
-    [ -n "$_exc_sql_err" ] && echo "$_exc_sql_err"
+    [ -n "$_exc_errs" ] && echo "$_exc_errs"
     local _exc_verify
     _exc_verify=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -N -e \
         "SELECT CONCAT(entry,'=',name) FROM acore_world.creature_template WHERE entry IN (1116001,1116002,1116003) ORDER BY entry;" 2>&1)
@@ -6294,6 +6291,8 @@ fix_battlepass_npc() {
     fi
     local _bp_sql_err
     _bp_sql_err=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world 2>&1 <<'_BPNPC_SQL'
+SET foreign_key_checks=0;
+SET sql_mode='';
 DELETE FROM `creature_template` WHERE `entry` = 90100;
 INSERT INTO `creature_template`
   (`entry`,`name`,`subname`,`gossip_menu_id`,`minlevel`,`maxlevel`,`exp`,`faction`,`npcflag`,
@@ -6316,14 +6315,17 @@ PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 SET @hasModelid1=(SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='creature_template' AND COLUMN_NAME='modelid1');
 SET @sql=IF(@hasModelid1>0,'UPDATE creature_template SET modelid1=25478 WHERE entry=90100','SELECT 1');
 PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+SET foreign_key_checks=1;
 _BPNPC_SQL
 )
-    if [ $? -ne 0 ]; then
+    local _bp_rc=$?
+    local _bp_errs; _bp_errs=$(echo "$_bp_sql_err" | grep -v "^mysql: \[Warning\]" | grep -v "^$")
+    if [ $_bp_rc -ne 0 ] || echo "$_bp_errs" | grep -qi "^ERROR"; then
         print_error "SQL apply failed:"
         echo "$_bp_sql_err"
         return 1
     fi
-    [ -n "$_bp_sql_err" ] && echo "$_bp_sql_err"
+    [ -n "$_bp_errs" ] && echo "$_bp_errs"
     local _bp_verify
     _bp_verify=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -N -e \
         "SELECT CONCAT('entry=',entry,' name=',name,' npcflag=',npcflag) FROM acore_world.creature_template WHERE entry=90100;" 2>&1)
