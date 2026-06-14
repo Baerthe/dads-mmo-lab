@@ -54,7 +54,7 @@ local GOSSIP_EVENT_ON_SELECT = 2
 local OPTION_ICON_CHAT       = 0
 local GOSSIP_ICON_VENDOR     = 1
 -- ALE: server event 16 = lua state closing (clean up spawned NPCs)
-local SERVER_EVENT_ON_LUA_STATE_CLOSE = 16
+local ALE_EVENT_ON_LUA_STATE_CLOSE = 16
 
 Config.ItemNpcOn  = 1   -- 1 = spawn item-exchange NPC
 Config.HonorNpcOn = 1   -- 1 = spawn honor-to-gold NPC
@@ -446,5 +446,5 @@ if Config.TokenNpcOn == 1 then
 end
 
 if Config.ItemNpcOn == 1 or Config.HonorNpcOn == 1 or Config.TokenNpcOn == 1 then
-    RegisterServerEvent(SERVER_EVENT_ON_LUA_STATE_CLOSE, eI_OnLuaStateClose)
+    RegisterServerEvent(ALE_EVENT_ON_LUA_STATE_CLOSE, eI_OnLuaStateClose)
 end

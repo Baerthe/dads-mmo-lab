@@ -2181,17 +2181,16 @@ ale_lua_is_deployed() {
 # Ensure the database container is up. Returns 1 if it cannot start.
 ensure_db_running() {
     refresh_container_names
-    if container_running "$DB_CONTAINER"; then
-        return 0
+    if ! container_running "$DB_CONTAINER"; then
+        print_info "Starting database container..."
+        (cd "$SERVER_DIR" && docker compose up -d ac-database 2>/dev/null) || true
+        refresh_container_names
     fi
-    print_info "Starting database container..."
-    (cd "$SERVER_DIR" && docker compose up -d ac-database 2>/dev/null) || true
-    refresh_container_names
+    # Always validate MySQL is accepting connections, even if container was already up
     local i
     for i in $(seq 1 15); do
         if docker exec "$DB_CONTAINER" mysqladmin ping \
             -uroot -p"$DB_ROOT_PASSWORD" &>/dev/null 2>&1; then
-            print_success "Database is up."
             return 0
         fi
         sleep 2
@@ -2227,19 +2226,26 @@ configure_ale_battlepass() {
 
     print_step "Battle Pass — SQL & Configuration"
 
-    # Apply SQL
+    # Apply SQL — track success of both required files
+    local _bp_world_ok=false _bp_chars_ok=false
     print_info "Applying Battle Pass SQL (requires database to be running)..."
     if ensure_db_running; then
-        ale_run_sql_file "acore_world"      "$clone_dir/sql/battlepass_world.sql"
-        ale_run_sql_file "acore_characters" "$clone_dir/sql/battlepass_characters.sql"
+        ale_run_sql_file "acore_world"      "$clone_dir/sql/battlepass_world.sql"      && _bp_world_ok=true
+        ale_run_sql_file "acore_characters" "$clone_dir/sql/battlepass_characters.sql" && _bp_chars_ok=true
+        if [ "$_bp_world_ok" = false ] || [ "$_bp_chars_ok" = false ]; then
+            print_warning "Battle Pass install incomplete — one or more SQL files failed:"
+            [ "$_bp_world_ok"  = false ] && print_info "  FAILED: $clone_dir/sql/battlepass_world.sql → acore_world"
+            [ "$_bp_chars_ok"  = false ] && print_info "  FAILED: $clone_dir/sql/battlepass_characters.sql → acore_characters"
+            print_info "Resolve SQL errors, then reconfigure via ALE Scripts menu → c on Battle Pass."
+        fi
     else
         print_warning "Skipping SQL — apply manually when the database is running:"
         print_info "  $clone_dir/sql/battlepass_world.sql      → acore_world"
         print_info "  $clone_dir/sql/battlepass_characters.sql → acore_characters"
     fi
 
-    # Interactive config updates to battlepass_config table
-    if container_running "$DB_CONTAINER"; then
+    # Interactive config — only when world schema exists (config table lives in acore_world)
+    if [ "$_bp_world_ok" = true ] && container_running "$DB_CONTAINER"; then
         echo ""
         print_info "Configure Battle Pass settings (press ENTER to keep defaults):"
         echo ""
@@ -2256,31 +2262,40 @@ configure_ale_battlepass() {
         exp_scaling=${exp_scaling:-1.1}
         npc_entry=${npc_entry:-90100}
         debug_mode=${debug_mode:-0}
-
-        if docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
-            -e "UPDATE battlepass_config SET value='$enabled'       WHERE \`key\`='enabled';
-                UPDATE battlepass_config SET value='$max_level'     WHERE \`key\`='max_level';
-                UPDATE battlepass_config SET value='$exp_per_level' WHERE \`key\`='exp_per_level';
-                UPDATE battlepass_config SET value='$exp_scaling'   WHERE \`key\`='exp_scaling';
-                UPDATE battlepass_config SET value='$npc_entry'     WHERE \`key\`='npc_entry';
-                UPDATE battlepass_config SET value='$debug_mode'    WHERE \`key\`='debug_mode';" \
-            2>/dev/null; then
-            # UPDATE succeeds even when 0 rows match (older schema missing some keys).
-            # Verify all 6 keys are actually present in the table.
-            local found_keys
-            found_keys=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
-                -sN -e "SELECT COUNT(*) FROM battlepass_config WHERE \`key\` IN \
-                        ('enabled','max_level','exp_per_level','exp_scaling','npc_entry','debug_mode');" \
-                2>/dev/null)
-            if [ "${found_keys:-0}" -ge 6 ]; then
-                print_success "Battle Pass config applied (all 6 keys updated)."
+        # Validate inputs before sending to MySQL
+        local _valid=true
+        [[ "$enabled"       =~ ^[01]$                  ]] || { print_warning "Invalid enabled value (must be 0 or 1).";       _valid=false; }
+        [[ "$max_level"     =~ ^[0-9]+$                ]] || { print_warning "Invalid max_level (must be integer).";          _valid=false; }
+        [[ "$exp_per_level" =~ ^[0-9]+$                ]] || { print_warning "Invalid exp_per_level (must be integer).";      _valid=false; }
+        [[ "$exp_scaling"   =~ ^[0-9]+([.][0-9]+)?$   ]] || { print_warning "Invalid exp_scaling (must be number e.g. 1.1)"; _valid=false; }
+        [[ "$npc_entry"     =~ ^[0-9]+$                ]] || { print_warning "Invalid npc_entry (must be integer).";          _valid=false; }
+        [[ "$debug_mode"    =~ ^[01]$                  ]] || { print_warning "Invalid debug_mode (must be 0 or 1).";          _valid=false; }
+        if [ "$_valid" = true ]; then
+            if docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
+                -e "UPDATE battlepass_config SET config_value='$enabled'       WHERE config_key='enabled';
+                    UPDATE battlepass_config SET config_value='$max_level'     WHERE config_key='max_level';
+                    UPDATE battlepass_config SET config_value='$exp_per_level' WHERE config_key='exp_per_level';
+                    UPDATE battlepass_config SET config_value='$exp_scaling'   WHERE config_key='exp_scaling';
+                    UPDATE battlepass_config SET config_value='$npc_entry'     WHERE config_key='npc_entry';
+                    UPDATE battlepass_config SET config_value='$debug_mode'    WHERE config_key='debug_mode';" \
+                2>/dev/null; then
+                local found_keys
+                found_keys=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world \
+                    -sN -e "SELECT COUNT(*) FROM battlepass_config WHERE config_key IN \
+                            ('enabled','max_level','exp_per_level','exp_scaling','npc_entry','debug_mode');" \
+                    2>/dev/null)
+                if [ "${found_keys:-0}" -ge 6 ]; then
+                    print_success "Battle Pass config applied (all 6 keys updated)."
+                else
+                    print_warning "Only ${found_keys:-0}/6 config keys found in battlepass_config."
+                    print_info "The table may be from an older install. Re-run the SQL files, then reconfigure."
+                fi
             else
-                print_warning "Only ${found_keys:-0}/6 config keys were found in battlepass_config."
-                print_info "The table may be from an older install. Re-run the SQL files, then reconfigure."
+                print_warning "Config update failed — the battlepass_config table may not exist yet."
+                print_info "Run the SQL files above first, then reconfigure via option C."
             fi
         else
-            print_warning "Config update failed — the battlepass_config table may not exist yet."
-            print_info "Run the SQL files above first, then reconfigure via option C."
+            print_info "Config not saved due to invalid input. Reconfigure via ALE Scripts menu → c on Battle Pass."
         fi
     fi
 
@@ -2326,17 +2341,28 @@ configure_ale_paragon() {
             for f in "${schema_files[@]}"; do echo "    - $(basename "$f")"; done
             echo ""
             if ask_yes_no "Apply Paragon schema migrations now?"; then
+                local _paragon_schema_ok=true
                 # 01_create_database.sql creates the acore_ale DB — run via acore_world
                 local db_create="$paragon_sql_dir/01_create_database.sql"
                 if [ -f "$db_create" ]; then
-                    ale_run_sql_file "acore_world" "$db_create"
+                    if ! ale_run_sql_file "acore_world" "$db_create"; then
+                        print_warning "Database creation failed — aborting remaining migrations."
+                        _paragon_schema_ok=false
+                    fi
                 fi
-                # Remaining migrations run against acore_ale
-                for f in "${schema_files[@]}"; do
-                    [[ "$(basename "$f")" == "01_create_database.sql" ]] && continue
-                    ale_run_sql_file "acore_ale" "$f"
-                done
+                # Remaining migrations run against acore_ale (only if 01 succeeded)
+                if [ "$_paragon_schema_ok" = true ]; then
+                    for f in "${schema_files[@]}"; do
+                        [[ "$(basename "$f")" == "01_create_database.sql" ]] && continue
+                        if ! ale_run_sql_file "acore_ale" "$f"; then
+                            print_warning "Migration failed — aborting remaining migrations."
+                            _paragon_schema_ok=false
+                            break
+                        fi
+                    done
+                fi
             else
+                local _paragon_schema_ok=false
                 print_warning "Apply migrations manually before starting the server:"
                 print_info "  mysql acore_world < $paragon_sql_dir/01_create_database.sql"
                 for f in "${schema_files[@]}"; do
@@ -2344,15 +2370,17 @@ configure_ale_paragon() {
                     print_info "  mysql acore_ale   < $f"
                 done
             fi
-            # Offer example/sample data separately
-            local example_file
-            example_file=$(find "$paragon_sql_dir" -name "*.sql" 2>/dev/null \
-                | grep -E '[0-9]{2}-[0-9]{2}|[Ee]xample' | sort | head -1)
-            if [ -n "$example_file" ]; then
-                echo ""
-                print_info "Optional example data: $(basename "$example_file")"
-                if ask_yes_no "Apply example data to acore_ale? (optional — safe to skip)"; then
-                    ale_run_sql_file "acore_ale" "$example_file"
+            # Offer example/sample data only if schema migrations succeeded
+            if [ "${_paragon_schema_ok:-false}" = true ]; then
+                local example_file
+                example_file=$(find "$paragon_sql_dir" -name "*.sql" 2>/dev/null \
+                    | grep -E '[0-9]{2}-[0-9]{2}|[Ee]xample' | sort | head -1)
+                if [ -n "$example_file" ]; then
+                    echo ""
+                    print_info "Optional example data: $(basename "$example_file")"
+                    if ask_yes_no "Apply example data to acore_ale? (optional — safe to skip)"; then
+                        ale_run_sql_file "acore_ale" "$example_file"
+                    fi
                 fi
             fi
         else
