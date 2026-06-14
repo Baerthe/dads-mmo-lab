@@ -46,7 +46,12 @@ SET @hasModelTable = (
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'creature_template_model'
 );
 SET @sql = IF(@hasModelTable > 0,
-  'INSERT IGNORE INTO creature_template_model (CreatureID, Idx, CreatureDisplayID, DisplayScale, Probability, VerifiedBuild) VALUES (2069430, 0, 6557, 1.0, 1.0, 0)',
+  'DELETE FROM creature_template_model WHERE CreatureID = 2069430',
+  'SELECT 1'
+);
+PREPARE _bmah_stmt FROM @sql; EXECUTE _bmah_stmt; DEALLOCATE PREPARE _bmah_stmt;
+SET @sql = IF(@hasModelTable > 0,
+  'INSERT INTO creature_template_model (CreatureID, Idx, CreatureDisplayID, DisplayScale, Probability, VerifiedBuild) VALUES (2069430, 0, 6557, 1.0, 1.0, 0)',
   'SELECT ''Skipping creature_template_model — not present in this AC build'' AS note'
 );
 PREPARE _bmah_stmt FROM @sql; EXECUTE _bmah_stmt; DEALLOCATE PREPARE _bmah_stmt;
@@ -73,3 +78,12 @@ VALUES
 
 -- ── Diagnostic: confirm what was inserted ────────────────────────────────────────
 SELECT entry, name, faction, npcflag FROM creature_template WHERE entry = 2069430;
+SET @hasModelTable2 = (
+  SELECT COUNT(*) FROM information_schema.TABLES
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'creature_template_model'
+);
+SET @sql = IF(@hasModelTable2 > 0,
+  'SELECT CreatureID, CreatureDisplayID, DisplayScale FROM creature_template_model WHERE CreatureID = 2069430',
+  'SELECT ''creature_template_model table not present'' AS model_note'
+);
+PREPARE _bmah_diag FROM @sql; EXECUTE _bmah_diag; DEALLOCATE PREPARE _bmah_diag;

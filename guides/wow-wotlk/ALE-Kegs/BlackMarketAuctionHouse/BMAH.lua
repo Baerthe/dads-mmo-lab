@@ -6,11 +6,12 @@
 -- ADMIN GUIDE:
 --   1. Run sql/BMAH_Up.sql against acore_world to create the vendor NPC
 --   2. Copy this file to your lua_scripts/ directory
---   3. Reload: .reload ale  (or restart worldserver)
+--   3. RESTART the worldserver (required for new creature_template rows to load)
 --   4. The DB table is created automatically on first load (acore_characters)
---   5. Reload NPC templates: .reload creature_template  (in-game GM command)
+--   5. Reload Lua: .reload ale  (in-game GM command)
 --   6. Spawn the NPC: .npc add 2069430  (or add your own entry to BMAH_VENDOR_NPCs)
 --   7. Client addon: copy Client Files/AddOns/BlackMarketUI → <WoW>/Interface/AddOns/
+--   NOTE: .reload creature_template will NOT load brand-new entries — full restart required.
 --
 -- USING A CUSTOM NPC:
 --   Add its entry ID to BMAH_VENDOR_NPCs below.
@@ -57,9 +58,20 @@ end
 -- ── Config ───────────────────────────────────────────────────────────────────
 -- NPC entry IDs that open the BMAH UI when interacted with
 local BMAH_VENDOR_NPCs = {
-    2069430, -- Test Subject
+    2069430, -- Black Market Broker
     -- add more entry IDs here as needed
 }
+
+-- Protocol constants (must match the BlackMarketUI client addon)
+local REQ      = "BMAH_REQ"    -- client requests auction list
+local DONE     = "BMAH_DONE"   -- server signals end of list
+local DATA     = "BMAH_DATA"   -- server sends one auction row
+local BID_REQ  = "BMAH_BID"    -- client places a bid
+local HOTBID_REQ = "BMAH_HOTBID" -- client places bid on hot item
+
+-- Currency constants
+local COPPER_PER_SILVER = 100
+local SILVER_PER_GOLD   = 100
 
 -- Fill-rarity thresholds (cumulative roll 0–1):
 --   0.00 ≤ r < FillRateCommon              → common
@@ -238,14 +250,6 @@ CREATE TABLE IF NOT EXISTS `blackmarketauctionhouse` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ]])
 
--- ── Constants ─────────────────────────────────────────────────────────────────
-local COPPER_PER_SILVER = 100
-local SILVER_PER_GOLD   = 100
-local REQ     = "BMAH_REQ"
-local DATA    = "BMAH_DATA"
-local DONE    = "BMAH_DONE"
-local BID_REQ    = "BMAH_BID"
-local HOTBID_REQ = "BMAH_HOTBID"
 math.randomseed(os.time())
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
