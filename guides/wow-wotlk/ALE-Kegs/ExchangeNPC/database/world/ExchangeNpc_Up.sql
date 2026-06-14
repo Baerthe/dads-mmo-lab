@@ -23,9 +23,9 @@ INSERT INTO `creature_template`
    `HealthModifier`, `ManaModifier`, `ArmorModifier`,
    `RegenHealth`, `flags_extra`, `VerifiedBuild`)
 VALUES
-  (1116001, 'Roboto',             'Trusted Dealer',        62001, 63, 63, 0, 35, 1, 1, 1.14286, 0, 0, 1, 2000, 2000, 1, 1, 1, 33536, 2048, 0, 2, '', 0, 1, 1.35, 1, 1, 1, 2, 0),
-  (1116002, 'Shadow Priest Hacki','The Honor Melter',      62001, 63, 63, 0, 35, 1, 1, 1.14286, 0, 0, 1, 2000, 2000, 1, 1, 1, 33536, 2048, 0, 2, '', 0, 1, 1.35, 1, 1, 1, 2, 0),
-  (1116003, 'Construct',          '...has the good stuff', 62001, 63, 63, 0, 35, 1, 1, 1.14286, 0, 0, 1, 2000, 2000, 1, 1, 1, 33536, 2048, 0, 2, '', 0, 1, 1.35, 1, 1, 1, 2, 0);
+  (1116001, 'Roboto',             'Trusted Dealer',        0, 63, 63, 0, 35, 1, 1, 1.14286, 0, 0, 1, 2000, 2000, 1, 1, 1, 33536, 2048, 0, 2, '', 0, 1, 1.35, 1, 1, 1, 2, 0),
+  (1116002, 'Shadow Priest Hacki','The Honor Melter',      0, 63, 63, 0, 35, 1, 1, 1.14286, 0, 0, 1, 2000, 2000, 1, 1, 1, 33536, 2048, 0, 2, '', 0, 1, 1.35, 1, 1, 1, 2, 0),
+  (1116003, 'Construct',          '...has the good stuff', 0, 63, 63, 0, 35, 1, 1, 1.14286, 0, 0, 1, 2000, 2000, 1, 1, 1, 33536, 2048, 0, 2, '', 0, 1, 1.35, 1, 1, 1, 2, 0);
 
 -- ── 1b. Scale — conditional (removed in some AC builds) ──────────────────────────
 SET @hasScale = (

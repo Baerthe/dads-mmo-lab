@@ -6575,7 +6575,7 @@ main_menu() {
         print_install_info
         printf "\n\n  ${GOLD}${BOLD}Sub-Menus${RST}\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
-        printf "  ${WHITE}1)${RST} Configuration\n"
+        printf "  ${WHITE}1)${RST} Configurations\n"
         printf "  ${WHITE}2)${RST} Server Modifications\n"
         printf "  ${WHITE}3)${RST} Server Controls\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"

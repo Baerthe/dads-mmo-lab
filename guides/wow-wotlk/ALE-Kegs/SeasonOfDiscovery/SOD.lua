@@ -7,6 +7,7 @@
 -- Prevents duplicate event registration on .reload ale
 if _G.SoDBuffLoaded then return end
 _G.SoDBuffLoaded = true
+RegisterServerEvent(16, function() _G.SoDBuffLoaded = nil end)
 
 -- ── Config ───────────────────────────────────────────────────────────────────
 local CONFIG = {

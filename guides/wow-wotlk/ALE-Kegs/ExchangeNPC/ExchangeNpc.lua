@@ -215,16 +215,16 @@ local function eI_ItemOnHello(event, player, creature)
         end
     end
     player:GossipMenuAddItem(GOSSIP_ICON_VENDOR, "Let's trade", 0, 10000)
-    player:GossipSendMenu(1, creature)
+    player:GossipSendMenu(Config.ItemGossipText, creature)
 end
 
 local function eI_ItemOnGossipSelect(event, player, object, sender, intid, code, menu_id)
     if not player then return end
     if intid < 1000 then
-        player:GossipComplete()
         local ExchangeId = intid
         if Config.TurnInItemAmount[ExchangeId] == nil then
-            PrintError('ExchangeNpc: ExchangeId ' .. ExchangeId .. ' not found in config.')
+            print('ExchangeNpc: ExchangeId ' .. ExchangeId .. ' not found in config.')
+            player:GossipComplete()
             return
         end
         player:GossipClearMenu()
@@ -232,7 +232,7 @@ local function eI_ItemOnGossipSelect(event, player, object, sender, intid, code,
         player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 5),  0, intid + 2000)
         player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 10), 0, intid + 3000)
         player:GossipMenuAddItem(OPTION_ICON_CHAT, eI_BuildExchangeString(ExchangeId, 20), 0, intid + 4000)
-        player:GossipSendMenu(1, object)
+        player:GossipSendMenu(Config.ItemGossipConfirmationText, object)
     elseif intid == 10000 then
         player:SendListInventory(object)
     else
@@ -276,18 +276,17 @@ local function eI_HonorOnHello(event, player, creature)
         local txt = 'Turn in ' .. Config.TurnInHonorAmount[n] .. ' honor to gain ' .. Config.GainGoldAmount[n] .. ' gold.'
         player:GossipMenuAddItem(OPTION_ICON_CHAT, txt, 0, n)
     end
-    player:GossipSendMenu(1, creature)
+    player:GossipSendMenu(Config.HonorGossipText, creature)
 end
 
 local function eI_HonorOnGossipSelect(event, player, object, sender, intid, code, menu_id)
     if not player then return end
     if intid < 1000 then
-        player:GossipComplete()
         local ExchangeId = intid
         local txt = 'Yes! Turn in ' .. Config.TurnInHonorAmount[ExchangeId] .. ' honor to gain ' .. Config.GainGoldAmount[ExchangeId] .. ' gold.'
         player:GossipClearMenu()
         player:GossipMenuAddItem(OPTION_ICON_CHAT, txt, 0, intid + 1000)
-        player:GossipSendMenu(1, object)
+        player:GossipSendMenu(Config.HonorGossipConfirmationText, object)
     else
         local ExchangeId   = intid - 1000
         local playerHonor  = player:GetHonorPoints()
@@ -314,7 +313,7 @@ end
 
 local function eI_HasHonorAndMarksAndRequiredItems(player, intid)
     if not Config.MarkEntry[intid] then
-        PrintError('ExchangeNpc: Config.MarkEntry[' .. intid .. '] missing')
+        print('ExchangeNpc: Config.MarkEntry[' .. intid .. '] missing')
         return false
     end
     for n = 1, #Config.MarkEntry[intid] do
@@ -343,7 +342,7 @@ local function eI_TokenOnHello(event, player, creature)
     player:GossipMenuAddItem(OPTION_ICON_CHAT, Config.TokenGossipRefundText, 0, 1000)
     if not player:HasAchieved(452) and not player:HasAchieved(440) then
         player:SendBroadcastMessage('You need at least 10k honorable kills to buy epic PvP items.')
-        player:GossipSendMenu(1, creature)
+        player:GossipSendMenu(Config.TokenGossipText, creature)
         return
     end
     for n = 1, #Config.GainTokenEntry do
@@ -351,12 +350,12 @@ local function eI_TokenOnHello(event, player, creature)
             player:GossipMenuAddItem(OPTION_ICON_CHAT, Config.TokenGossipOptionText[n], 0, n)
         end
     end
-    player:GossipSendMenu(1, creature)
+    player:GossipSendMenu(Config.TokenGossipText, creature)
 end
 
 local function eI_TokenOnGossipSelect(event, player, object, sender, intid, code, menu_id)
     if not player then
-        PrintError('ExchangeNpc: nil player in eI_TokenOnGossipSelect')
+        print('ExchangeNpc: nil player in eI_TokenOnGossipSelect')
         return
     end
     if intid == 1000 then
@@ -371,10 +370,12 @@ local function eI_TokenOnGossipSelect(event, player, object, sender, intid, code
                 return
             end
         end
+        player:GossipComplete()
         return
     end
     if intid > 6 and not player:HasAchieved(439) and not player:HasAchieved(451) then
         player:SendBroadcastMessage('You need at least 20k honorable kills to buy epic PvP weapons.')
+        player:GossipComplete()
         return
     end
     if eI_HasHonorAndMarksAndRequiredItems(player, intid) then
@@ -421,7 +422,7 @@ local function spawnAndTrack(guidTable, entry, instanceId, mapIdTable, xTable, y
                 for _, sid in ipairs(spells) do npc:CastSpell(npc, sid, true) end
             end
         else
-            PrintError('ExchangeNpc: PerformIngameSpawn failed for entry ' .. entry .. ' on map ' .. mapIdTable[k])
+            print('[ExchangeNpc] PerformIngameSpawn failed for entry ' .. entry .. ' on map ' .. mapIdTable[k])
         end
     end
 end
@@ -433,7 +434,7 @@ if Config.ItemNpcOn == 1 then
     local ok1, err1 = pcall(RegisterCreatureGossipEvent, Config.ItemNpcEntry, GOSSIP_EVENT_ON_HELLO,  eI_ItemOnHello)
     local ok2, err2 = pcall(RegisterCreatureGossipEvent, Config.ItemNpcEntry, GOSSIP_EVENT_ON_SELECT, eI_ItemOnGossipSelect)
     if not ok1 or not ok2 then
-        PrintError('ExchangeNpc: ITEM gossip failed for entry ' .. Config.ItemNpcEntry .. ' — restart worldserver: ' .. tostring(err1 or err2))
+        print('[ExchangeNpc] ITEM gossip failed for entry ' .. Config.ItemNpcEntry .. ' — restart worldserver: ' .. tostring(err1 or err2))
     else
         print('[ExchangeNpc] ITEM gossip registered OK for entry ' .. Config.ItemNpcEntry)
     end
@@ -446,7 +447,7 @@ if Config.HonorNpcOn == 1 then
     local ok1, err1 = pcall(RegisterCreatureGossipEvent, Config.HonorNpcEntry, GOSSIP_EVENT_ON_HELLO,  eI_HonorOnHello)
     local ok2, err2 = pcall(RegisterCreatureGossipEvent, Config.HonorNpcEntry, GOSSIP_EVENT_ON_SELECT, eI_HonorOnGossipSelect)
     if not ok1 or not ok2 then
-        PrintError('ExchangeNpc: HONOR gossip failed for entry ' .. Config.HonorNpcEntry .. ' — restart worldserver: ' .. tostring(err1 or err2))
+        print('[ExchangeNpc] HONOR gossip failed for entry ' .. Config.HonorNpcEntry .. ' — restart worldserver: ' .. tostring(err1 or err2))
     else
         print('[ExchangeNpc] HONOR gossip registered OK for entry ' .. Config.HonorNpcEntry)
     end
@@ -459,7 +460,7 @@ if Config.TokenNpcOn == 1 then
     local ok1, err1 = pcall(RegisterCreatureGossipEvent, Config.TokenNpcEntry, GOSSIP_EVENT_ON_HELLO,  eI_TokenOnHello)
     local ok2, err2 = pcall(RegisterCreatureGossipEvent, Config.TokenNpcEntry, GOSSIP_EVENT_ON_SELECT, eI_TokenOnGossipSelect)
     if not ok1 or not ok2 then
-        PrintError('ExchangeNpc: TOKEN gossip failed for entry ' .. Config.TokenNpcEntry .. ' — restart worldserver: ' .. tostring(err1 or err2))
+        print('[ExchangeNpc] TOKEN gossip failed for entry ' .. Config.TokenNpcEntry .. ' — restart worldserver: ' .. tostring(err1 or err2))
     else
         print('[ExchangeNpc] TOKEN gossip registered OK for entry ' .. Config.TokenNpcEntry)
     end
