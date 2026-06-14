@@ -3596,40 +3596,30 @@ ale_script_install() {
             ;;
         exchangenpc)
             echo ""
-            print_warning "Exchange NPC requires world SQL to be applied before the NPCs will work."
-            local _exchangenpc_sql_ok=false
+            print_step "Exchange NPC — SQL setup"
             local _exc_sql_dir="$clone_dir/guides/wow-wotlk/ALE-Kegs/ExchangeNPC/database/world"
             local _exc_sql_up="$_exc_sql_dir/ExchangeNpc_Up.sql"
             if [ ! -f "$_exc_sql_up" ]; then
                 print_warning "SQL file not found at: $_exc_sql_up"
                 print_info "The sparse checkout may be incomplete. Try re-installing."
-            elif ask_yes_no "Apply ExchangeNpc_Up.sql to acore_world now? (required for NPCs to spawn)"; then
+            else
                 if ensure_db_running; then
                     if ale_run_sql_file "acore_world" "$_exc_sql_up"; then
-                        _exchangenpc_sql_ok=true
                         print_success "Exchange NPC SQL applied."
                     else
-                        print_warning "SQL apply failed — check DB logs and retry or apply manually."
-                        print_info "Manual: $_exc_sql_up"
+                        print_warning "SQL apply failed — check DB logs or run option 6 in Server Maintenance."
                     fi
                 else
-                    print_warning "Database not available. Apply SQL manually when DB is running:"
-                    print_info "  mysql acore_world < $_exc_sql_up"
+                    print_warning "Database not available. Apply SQL manually when DB is running."
                 fi
-            else
-                print_info "Skipped. Apply manually when ready:"
-                print_info "  $_exc_sql_up"
             fi
             echo ""
-            print_info "Exchange NPC (Roboto, entry 1116001) is in the database but has no spawn point."
-            if [ "$_exchangenpc_sql_ok" = true ]; then
-                _offer_npc_in_capitals 1116001 "Roboto (Exchange NPC)" \
-                    "The NPC template was just applied — restart the server, then run these commands."
-            else
-                print_info "After SQL is applied, spawn the NPC in-game:"
-                print_info "  ${CYAN}.npc add 1116001 0 -8831.3 628.2 94.1 3.7${RST}  (Stormwind)"
-                print_info "  ${CYAN}.npc add 1116001 1  1597.2 -4415.7 17.5 4.5${RST}  (Orgrimmar)"
-            fi
+            fix_exchangenpc_npc
+            echo ""
+            print_info "After restarting the server, spawn the NPCs in-game:"
+            _offer_npc_in_capitals 1116001 "Roboto (Item Exchange)" \
+                "Restart the server first — creature_template must reload."
+            _offer_npc_in_capitals 1116002 "Shadow Priest Hacki (Honor Exchange)" ""
             ;;
         battlepass)
             echo ""
@@ -6238,11 +6228,12 @@ fix_dbimport_table_exists() {
     fi
 }
 
-fix_battlepass_npc() {
-    print_step "Fix: BattlePass NPC (entry 90100) missing from database"
+fix_exchangenpc_npc() {
+    print_step "Fix: Exchange NPC entries (1116001–1116003) in database"
     echo ""
-    echo -e "${WHITE}This creates creature_template entry 90100 (Battle Pass Vendor) in${RST}"
-    echo -e "${WHITE}acore_world. Required before .npc add 90100 will work in-game.${RST}"
+    echo -e "${WHITE}Verifies creature_template rows for Roboto (1116001), Shadow Priest${RST}"
+    echo -e "${WHITE}Hacki (1116002), and Construct (1116003) with npcflag=1 and${RST}"
+    echo -e "${WHITE}gossip_menu_id=0 so Eluna gossip works correctly.${RST}"
     echo ""
     refresh_container_names
     sqlmod_init
@@ -6250,7 +6241,84 @@ fix_battlepass_npc() {
         print_error "Database container is not running — start the server first."
         return 1
     fi
-    if docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world 2>/dev/null <<'_BPNPC_SQL'
+    local _exc_sql_err
+    _exc_sql_err=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world 2>&1 <<'_EXCNPC_SQL'
+DELETE FROM `creature_template` WHERE `entry` IN (1116001,1116002,1116003);
+INSERT INTO `creature_template`
+  (`entry`,`name`,`subname`,`gossip_menu_id`,`minlevel`,`maxlevel`,`exp`,`faction`,`npcflag`,
+   `speed_walk`,`speed_run`,`rank`,`dmgschool`,`DamageModifier`,
+   `BaseAttackTime`,`RangeAttackTime`,`BaseVariance`,`RangeVariance`,
+   `unit_class`,`unit_flags`,`unit_flags2`,`dynamicflags`,
+   `type`,`AIName`,`MovementType`,`HoverHeight`,
+   `HealthModifier`,`ManaModifier`,`ArmorModifier`,`RegenHealth`,`flags_extra`,`VerifiedBuild`)
+VALUES
+  (1116001,'Roboto',             'Trusted Dealer',        0,63,63,0,35,1,1,1.14286,0,0,1,2000,2000,1,1,1,33536,2048,0,2,'',0,1,1.35,1,1,1,2,0),
+  (1116002,'Shadow Priest Hacki','The Honor Melter',      0,63,63,0,35,1,1,1.14286,0,0,1,2000,2000,1,1,1,33536,2048,0,2,'',0,1,1.35,1,1,1,2,0),
+  (1116003,'Construct',          '...has the good stuff', 0,63,63,0,35,1,1,1.14286,0,0,1,2000,2000,1,1,1,33536,2048,0,2,'',0,1,1.35,1,1,1,2,0);
+SET @hasScale=(SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='creature_template' AND COLUMN_NAME='scale');
+SET @sql=IF(@hasScale>0,'UPDATE creature_template SET scale=1.0 WHERE entry IN (1116001,1116002); UPDATE creature_template SET scale=0.7 WHERE entry=1116003','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+SET @hasModelTable=(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='creature_template_model');
+SET @sql=IF(@hasModelTable>0,'DELETE FROM creature_template_model WHERE CreatureID IN (1116001,1116002,1116003)','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+SET @sql=IF(@hasModelTable>0,'INSERT INTO creature_template_model (CreatureID,Idx,CreatureDisplayID,DisplayScale,Probability,VerifiedBuild) VALUES (1116001,0,1097,1.0,1.0,0),(1116002,0,24207,1.0,1.0,0),(1116003,0,27645,0.7,1.0,0)','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+SET @hasModelid1=(SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='creature_template' AND COLUMN_NAME='modelid1');
+SET @sql=IF(@hasModelid1>0,'UPDATE creature_template SET modelid1=1097 WHERE entry=1116001; UPDATE creature_template SET modelid1=24207 WHERE entry=1116002; UPDATE creature_template SET modelid1=27645 WHERE entry=1116003','SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+DELETE FROM `npc_text` WHERE `ID` IN (92101,92102,92103,92104,92105);
+INSERT INTO `npc_text` (`ID`,`text0_0`,`BroadcastTextID0`,`lang0`,`Probability0`,`em0_0`,`em0_1`,`em0_2`,`em0_3`,`em0_4`,`em0_5`,`BroadcastTextID1`,`lang1`,`Probability1`,`em1_0`,`em1_1`,`em1_2`,`em1_3`,`em1_4`,`em1_5`,`BroadcastTextID2`,`lang2`,`Probability2`,`em2_0`,`em2_1`,`em2_2`,`em2_3`,`em2_4`,`em2_5`,`BroadcastTextID3`,`lang3`,`Probability3`,`em3_0`,`em3_1`,`em3_2`,`em3_3`,`em3_4`,`em3_5`,`BroadcastTextID4`,`lang4`,`Probability4`,`em4_0`,`em4_1`,`em4_2`,`em4_3`,`em4_4`,`em4_5`,`BroadcastTextID5`,`lang5`,`Probability5`,`em5_0`,`em5_1`,`em5_2`,`em5_3`,`em5_4`,`em5_5`,`BroadcastTextID6`,`lang6`,`Probability6`,`em6_0`,`em6_1`,`em6_2`,`em6_3`,`em6_4`,`em6_5`,`BroadcastTextID7`,`lang7`,`Probability7`,`em7_0`,`em7_1`,`em7_2`,`em7_3`,`em7_4`,`em7_5`,`VerifiedBuild`) VALUES
+(92101,'Hello Time Traveler! Chromie has ordered me to provide you with proper tools on your journey, if you can show evidence of being worthy.',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
+(92102,'Are you sure you wish to turn them in?',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
+(92103,'Hello Time Traveler! Chromie has ordered me to reward you for your efforts in faction wars.',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
+(92104,'Are you sure you wish to spend your acquired honor for money? There is no turning back!',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
+(92105,'I am offering Tokens for the most powerful gear, designed for combat against other heroes.',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1);
+DELETE FROM `creature_equip_template` WHERE `CreatureID` IN (1116001,1116002);
+INSERT INTO `creature_equip_template` (`CreatureID`,`ID`,`ItemID1`,`ItemID2`,`ItemID3`,`VerifiedBuild`) VALUES (1116002,1,18609,0,0,18019);
+_EXCNPC_SQL
+)
+    if [ $? -ne 0 ]; then
+        print_error "SQL apply failed:"
+        echo "$_exc_sql_err"
+        return 1
+    fi
+    [ -n "$_exc_sql_err" ] && echo "$_exc_sql_err"
+    local _exc_verify
+    _exc_verify=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -N -e \
+        "SELECT CONCAT(entry,'=',name) FROM acore_world.creature_template WHERE entry IN (1116001,1116002,1116003) ORDER BY entry;" 2>&1)
+    local _exc_count; _exc_count=$(echo "$_exc_verify" | grep -c "=")
+    if [ "$_exc_count" -eq 3 ]; then
+        print_success "Verified: all 3 entries exist in DB"
+        echo "  $_exc_verify" | tr '\n' '  ' && echo ""
+    else
+        print_error "Verification failed — only $_exc_count/3 entries found. Output: $_exc_verify"
+        return 1
+    fi
+    echo ""
+    if ask_yes_no "Restart the worldserver now to load the new creature_template entries?"; then
+        cd "$SERVER_DIR" && docker compose restart worldserver && \
+            print_success "Worldserver restarted — spawn NPCs with .npc add (see ALE Scripts → c on Exchange NPC)." || \
+            print_error "Restart failed. Run: cd $SERVER_DIR && docker compose restart worldserver"
+    else
+        print_info "Remember to restart the worldserver before spawning:"
+        print_info "  ${CYAN}cd $SERVER_DIR && docker compose restart worldserver${RST}"
+    fi
+}
+
+fix_battlepass_npc() {
+    print_step "Fix: BattlePass NPC (entry 90100) missing from database"
+    echo ""
+    echo -e "${WHITE}Creates creature_template entry 90100 (Battle Pass Vendor) in acore_world.${RST}"
+    echo -e "${WHITE}Required before .npc add 90100 will work in-game.${RST}"
+    echo ""
+    refresh_container_names
+    sqlmod_init
+    if ! container_running "$DB_CONTAINER"; then
+        print_error "Database container is not running — start the server first."
+        return 1
+    fi
+    local _bp_sql_err
+    _bp_sql_err=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" acore_world 2>&1 <<'_BPNPC_SQL'
 DELETE FROM `creature_template` WHERE `entry` = 90100;
 INSERT INTO `creature_template`
   (`entry`,`name`,`subname`,`gossip_menu_id`,`minlevel`,`maxlevel`,`exp`,`faction`,`npcflag`,
@@ -6274,15 +6342,31 @@ SET @hasModelid1=(SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SC
 SET @sql=IF(@hasModelid1>0,'UPDATE creature_template SET modelid1=25478 WHERE entry=90100','SELECT 1');
 PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 _BPNPC_SQL
-    then
-        print_success "NPC entry 90100 (Battle Pass Vendor) created in acore_world."
-        echo ""
-        print_info "Next steps:"
-        print_info "  1. Restart the worldserver (ObjectMgr must reload creature_template):"
-        print_info "     ${CYAN}docker compose restart worldserver${RST}"
-        print_info "  2. In-game: ${CYAN}.npc add 90100${RST}  to spawn the vendor"
+)
+    if [ $? -ne 0 ]; then
+        print_error "SQL apply failed:"
+        echo "$_bp_sql_err"
+        return 1
+    fi
+    [ -n "$_bp_sql_err" ] && echo "$_bp_sql_err"
+    local _bp_verify
+    _bp_verify=$(docker exec "$DB_CONTAINER" mysql -uroot -p"$DB_ROOT_PASSWORD" -N -e \
+        "SELECT CONCAT('entry=',entry,' name=',name,' npcflag=',npcflag) FROM acore_world.creature_template WHERE entry=90100;" 2>&1)
+    if echo "$_bp_verify" | grep -q "entry=90100"; then
+        print_success "Verified: entry 90100 exists in DB → $_bp_verify"
     else
-        print_error "SQL failed — is the database container running?"
+        print_error "Verification failed — entry 90100 not found after SQL. Output: $_bp_verify"
+        return 1
+    fi
+    echo ""
+    if ask_yes_no "Restart the worldserver now to load the new creature_template?"; then
+        cd "$SERVER_DIR" && docker compose restart worldserver && \
+            print_success "Worldserver restarted — use .npc add 90100 in-game to spawn the NPC." || \
+            print_error "Restart failed. Run: cd $SERVER_DIR && docker compose restart worldserver"
+    else
+        print_info "Remember to restart the worldserver before spawning:"
+        print_info "  ${CYAN}cd $SERVER_DIR && docker compose restart worldserver${RST}"
+        print_info "  then in-game: ${CYAN}.npc add 90100${RST}"
     fi
 }
 
@@ -6301,6 +6385,7 @@ menu_server_maintenance() {
         printf "  ${WHITE}3)${RST} Restore / import a backup\n"
         printf "  ${WHITE}4)${RST} Fix: ac-db-import 'Table already exists' errors\n"
         printf "  ${WHITE}5)${RST} Fix: BattlePass NPC missing (entry 90100)\n"
+        printf "  ${WHITE}6)${RST} Fix: Exchange NPC entries missing (1116001–1116003)\n"
         printf "  ${GOLD}──────────────────────────────────────────────────${RST}\n"
         printf "  ${DIM}  [ENTER] Back${RST}\n"
 
@@ -6318,8 +6403,9 @@ menu_server_maintenance() {
             3) _maintenance_import ;;
             4) fix_dbimport_table_exists; press_enter ;;
             5) fix_battlepass_npc; press_enter ;;
+            6) fix_exchangenpc_npc; press_enter ;;
             "") return ;;
-            *) print_warning "Enter 1–5 or ENTER to go back."; press_enter ;;
+            *) print_warning "Enter 1–6 or ENTER to go back."; press_enter ;;
         esac
     done
 }

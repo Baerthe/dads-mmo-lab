@@ -57,6 +57,7 @@ local OPTION_ICON_CHAT       = 0
 local GOSSIP_ICON_VENDOR     = 1
 -- ALE: server event 16 = lua state closing (clean up spawned NPCs)
 local ALE_EVENT_ON_LUA_STATE_CLOSE = 16
+local function dbg(msg) print('[ExchangeNpc] ' .. tostring(msg)) end
 
 Config.ItemNpcOn  = 1   -- 1 = spawn item-exchange NPC
 Config.HonorNpcOn = 1   -- 1 = spawn honor-to-gold NPC
@@ -208,6 +209,7 @@ end
 
 local function eI_ItemOnHello(event, player, creature)
     if not player then return end
+    dbg('ItemOnHello fired for entry ' .. tostring(creature and creature:GetEntry()))
     player:GossipClearMenu()
     if Config.TurnInItemEntry and Config.TurnInItemEntry[1] then
         for n = 1, #Config.TurnInItemEntry do
@@ -271,6 +273,7 @@ end
 
 local function eI_HonorOnHello(event, player, creature)
     if not player then return end
+    dbg('HonorOnHello fired for entry ' .. tostring(creature and creature:GetEntry()))
     player:GossipClearMenu()
     for n = 1, #Config.TurnInHonorAmount do
         local txt = 'Turn in ' .. Config.TurnInHonorAmount[n] .. ' honor to gain ' .. Config.GainGoldAmount[n] .. ' gold.'
