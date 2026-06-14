@@ -3651,19 +3651,21 @@ ale_script_install() {
             ;;
         bmah)
             echo ""
-            # Apply world SQL (creates creature_template with gossip npcflag)
+            # Apply world SQL (creates creature_template, model, and npc_text entries)
             local _bmah_sql="$clone_dir/guides/wow-wotlk/ALE-Kegs/BlackMarketAuctionHouse/sql/BMAH_Up.sql"
             if [ -f "$_bmah_sql" ]; then
                 print_step "BMAH — Applying NPC setup SQL (acore_world)..."
                 if ale_run_sql_file "acore_world" "$_bmah_sql"; then
-                    print_success "BMAH NPC (entry 2069430) created in acore_world."
+                    print_success "BMAH NPC (entry 2069430) created/updated in acore_world."
+                    print_info "After restarting or reloading, spawn with: .npc add 2069430"
+                    print_info "In-game GM reload: .reload creature_template"
                 else
                     print_warning "SQL failed — run manually:"
                     print_info "  $_bmah_sql"
                 fi
             else
                 print_warning "BMAH_Up.sql not found — NPC may not be gossip-enabled."
-                print_info "Manual: UPDATE creature_template SET npcflag = npcflag | 1 WHERE entry = 2069430;"
+                print_info "Manual: UPDATE creature_template SET npcflag = npcflag | 1, faction = 35 WHERE entry = 2069430;"
             fi
             echo ""
             print_step "BMAH — Client Addon"
@@ -3680,7 +3682,7 @@ ale_script_install() {
             echo ""
             print_info "Black Market AH Auctioneer (entry 2069430) needs to be placed in the world."
             _offer_npc_in_capitals 2069430 "Black Market AH Auctioneer" \
-                "Run after reloading ALE scripts or restarting the worldserver."
+                "First run: .reload creature_template — then use .npc add 2069430"
             ;;
         sod)
             echo ""

@@ -8,8 +8,9 @@
 --   2. Copy this file to your lua_scripts/ directory
 --   3. Reload: .reload ale  (or restart worldserver)
 --   4. The DB table is created automatically on first load (acore_characters)
---   5. Spawn the NPC: .npc add 2069430  (or add your own entry to BMAH_VENDOR_NPCs)
---   6. Client addon: copy Client Files/AddOns/BlackMarketUI → <WoW>/Interface/AddOns/
+--   5. Reload NPC templates: .reload creature_template  (in-game GM command)
+--   6. Spawn the NPC: .npc add 2069430  (or add your own entry to BMAH_VENDOR_NPCs)
+--   7. Client addon: copy Client Files/AddOns/BlackMarketUI → <WoW>/Interface/AddOns/
 --
 -- USING A CUSTOM NPC:
 --   Add its entry ID to BMAH_VENDOR_NPCs below.
@@ -292,13 +293,15 @@ local function rollItem()
 end
 
 -- ── Gossip: open BMAH UI ──────────────────────────────────────────────────────
--- ALE requires GossipMenuAddItem + GossipSendMenu to open the gossip window.
--- HELLO shows one option; SELECT sends the addon message and closes the window.
+-- ALE requires GossipClearMenu + GossipMenuAddItem + GossipSendMenu to open
+-- the gossip window.  GossipClearMenu flushes any stale items from prior calls.
+-- The npc_text ID (2069430) is created by sql/BMAH_Up.sql.
 local GOSSIP_EVENT_ON_HELLO  = 1
 local GOSSIP_EVENT_ON_SELECT = 2
 local function OnBMAHGossipHello(event, player, creature)
+    player:GossipClearMenu()
     player:GossipMenuAddItem(4, "Browse the Black Market", 0, 1)
-    player:GossipSendMenu(68, creature, 0)
+    player:GossipSendMenu(2069430, creature, 0)
 end
 local function OnBMAHGossipSelect(event, player, creature, sender, intid, code, menu_id)
     if intid == 1 then
