@@ -1597,7 +1597,6 @@ declare -a ALE_SCRIPT_REGISTRY=(
     "activechat|Azeroth Chatter (lore-grounded ambient world RP chat)|https://github.com/svey-xyz/ActiveChat.git"
     "battlepass|Battle Pass System (XP progression + rewards + client addon)|https://github.com/Shonik/lua-battlepass.git"
     "bmah|Black Market Auction House (MoP-style BMAH + client addon)|https://github.com/DadsMmoLab/dads-mmo-lab.git"
-    "levelupreward|Level Up Reward (random class-appropriate gear on every level-up)|https://github.com/phreeez/Levelreward.git"
     "lootpet|Loot Pet (vanity pet auto-loots nearby corpses)|https://github.com/Brytenwally/Lootpet.git"
     "paragon|Paragon Anniversary (endless post-80 stat progression + client addon)|https://github.com/Grim-Batol/Paragon-Anniversary.git"
     "sitmeanrest|Sit Means Rest (regen buff on /sit; strips on movement)|https://github.com/Brytenwally/SitMeansRest.git"
@@ -2670,7 +2669,6 @@ ale_lua_is_deployed() {
     case "$key" in
         accountwide)   [ -d "$lua_dir/accountwide" ] && \
                         ls "$lua_dir/accountwide"/*.lua &>/dev/null ;;
-        levelupreward) ls "$lua_dir"/levelreward.lua &>/dev/null 2>&1 ;;
         activechat)    [ -d "$lua_dir/AzerothChatter" ] ;;
         battlepass)    [ -d "$lua_dir/battlepass" ] ;;
         paragon)       [ -d "$lua_dir/paragon" ] ;;
@@ -3603,25 +3601,6 @@ ale_deploy_lua_files() {
             else
                 print_warning "Expected directory not found: $src"
                 print_info "Manually copy .lua files to: $lua_dir/accountwide/"
-            fi
-            ;;
-        levelupreward)
-            local count=0
-            if cp "$clone_dir"/*.lua "$lua_dir/" 2>/dev/null; then
-                count=$(ls "$clone_dir"/*.lua 2>/dev/null | wc -l | tr -d ' ')
-                print_success "Deployed $count file(s) → lua_scripts/"
-                # Patch: add playerbot guard so bots are skipped in OnLevelChange.
-                # Without this, the level-brackets module fires hundreds of OnLevelChange
-                # events during bot AI init, each triggering two synchronous WorldDBQuery
-                # calls + AddItem — causing a silent crash on every server start.
-                local _lr="$lua_dir/levelreward.lua"
-                if [ -f "$_lr" ]; then
-                    awk '/    if not player then return end/{print; print "    if player:IsBot() then return end"; next} 1' \
-                        "$_lr" > "$_lr.tmp" && mv "$_lr.tmp" "$_lr"
-                    print_success "Patched levelreward.lua: added playerbot guard (player:IsBot())."
-                fi
-            else
-                print_warning "No .lua files found in clone root — check $clone_dir"
             fi
             ;;
         activechat)
