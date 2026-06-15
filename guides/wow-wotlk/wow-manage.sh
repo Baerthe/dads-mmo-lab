@@ -28,7 +28,7 @@
 #  https://github.com/DadsMmoLab/dads-mmo-lab
 # ============================================================
 
-MANAGER_VERSION="2.2.1 - ALE House Edition"
+MANAGER_VERSION="2.2.3 - ALE House Edition"
 
 set -o pipefail
 
@@ -1589,7 +1589,10 @@ declare -a MODULE_UPDATE_FILES=(
 # These are Lua scripts that run on the ALE engine — NOT compiled C++ modules.
 # Clones stored in $SERVER_DIR/ale_scripts/<key>/
 # Deployed to  $SERVER_DIR/env/dist/etc/modules/lua_scripts/
-# Format: "key|display name|git url"
+# Format: "key|display name|git url[|ref]"
+#   ref (optional 4th field): pin to an exact commit SHA, tag, or branch.
+#   When set, the clone is checked out to that exact ref and stays pinned on
+#   reinstall (no auto-pull to upstream HEAD). Omit to track the default branch.
 # Special install steps (SQL, client addons, config) are handled per-key
 # inside ale_script_install() and the configure_ale_* functions.
 declare -a ALE_SCRIPT_REGISTRY=(
@@ -3165,7 +3168,7 @@ configure_ale_sitmeanrest() {
         print_warning "  '${_smr_aura}' is not a valid spell ID — keeping current."
     fi
 
-    echo ""
+    echo ""    "accountwide|Accountwide Systems...|https://github.com/Aldori15/azerothcore-eluna-accountwide.git"
     print_info "No SQL required — drop-in script."
     print_info "Reload with ${CYAN}.reload ale${RST} in-game or restart the worldserver."
 }
@@ -3594,9 +3597,17 @@ ale_deploy_lua_files() {
             # Upstream layout: lua_scripts/AccountWide/*.lua
             local src="$clone_dir/lua_scripts/AccountWide"
             if [ -d "$src" ]; then
+                # Clean the target first. cp-over-the-top is NOT idempotent:
+                # upstream renames/restructures files between commits (e.g. the
+                # AccountReputation default/custom variants), so reinstalling or
+                # switching commits would otherwise leave stale .lua files behind.
+                # ALE loads every .lua here recursively, and two files defining
+                # the same globals / OnLogin hook double-register and hard-crash
+                # the worldserver on (bot) login. Wipe then redeploy a pristine set.
+                rm -rf "$lua_dir/accountwide"
                 mkdir -p "$lua_dir/accountwide"
                 cp "$src"/*.lua "$lua_dir/accountwide/" && \
-                    print_success "Deployed → lua_scripts/accountwide/" || \
+                    print_success "Deployed → lua_scripts/accountwide/ (clean redeploy)" || \
                     print_warning "Copy failed — check $src"
             else
                 print_warning "Expected directory not found: $src"
@@ -3780,20 +3791,47 @@ ale_script_install() {
             print_success "Fetched $name"
         fi
     elif ale_script_is_installed "$key"; then
-        print_info "Already cloned — pulling latest..."
-        (cd "$clone_dir" && git pull --depth=1 origin "$branch" --quiet 2>/dev/null) || \
-            print_warning "git pull failed — using existing copy"
+        if [ "$branch" != "HEAD" ]; then
+            # Pinned to an exact ref (commit SHA / tag / branch) — fetch it
+            # shallowly and hard-checkout so we never drift to upstream HEAD.
+            print_info "Pinned ref — syncing to ${branch:0:12}..."
+            if git -C "$clone_dir" fetch --depth=1 origin "$branch" --quiet 2>/dev/null \
+               && git -C "$clone_dir" checkout --quiet --force FETCH_HEAD 2>/dev/null; then
+                print_success "Checked out $name @ ${branch:0:12}"
+            else
+                print_warning "Could not sync pinned ref $branch — using existing copy"
+            fi
+        else
+            print_info "Already cloned — pulling latest..."
+            (cd "$clone_dir" && git pull --depth=1 origin "$branch" --quiet 2>/dev/null) || \
+                print_warning "git pull failed — using existing copy"
+        fi
     else
         if [ -d "$clone_dir" ] && [ ! -d "$clone_dir/.git" ]; then
             print_warning "Removing incomplete clone at $clone_dir"
             rm -rf "$clone_dir"
         fi
-        if ! git clone --depth 1 "$url" "$clone_dir"; then
-            rm -rf "$clone_dir"
-            print_error "Clone failed for $name!"
-            return 1
+        if [ "$branch" != "HEAD" ]; then
+            # Pinned ref: init + shallow-fetch the exact commit, then checkout.
+            # GitHub allows fetching an arbitrary SHA, so --depth=1 stays cheap.
+            mkdir -p "$clone_dir"
+            if ! git -C "$clone_dir" init -q \
+               || ! git -C "$clone_dir" remote add origin "$url" \
+               || ! git -C "$clone_dir" fetch --depth=1 origin "$branch" --quiet \
+               || ! git -C "$clone_dir" checkout --quiet --force FETCH_HEAD; then
+                rm -rf "$clone_dir"
+                print_error "Pinned clone failed for $name (ref $branch)!"
+                return 1
+            fi
+            print_success "Cloned $name @ ${branch:0:12}"
+        else
+            if ! git clone --depth 1 "$url" "$clone_dir"; then
+                rm -rf "$clone_dir"
+                print_error "Clone failed for $name!"
+                return 1
+            fi
+            print_success "Cloned $name"
         fi
-        print_success "Cloned $name"
     fi
 
     ale_deploy_lua_files "$key" "$clone_dir"
@@ -3806,20 +3844,22 @@ ale_script_install() {
             print_info "00_AccountWideUtils.lua is required alongside all other Accountwide"
             print_info "scripts — it has been deployed with the rest in lua_scripts/accountwide/."
             echo ""
-            print_warning "Accountwide REQUIRES a characters DB schema — the system will not work without it."
-            if ask_yes_no "Apply Accountwide characters SQL now? (required)"; then
-                local sql_file="$clone_dir/sql/create_accountwide_tables.sql"
+            print_info "Accountwide requires a characters DB schema."
+            if ask_yes_no "Apply Accountwide characters SQL now?"; then
                 if ensure_db_running; then
+                    local sql_file="$clone_dir/sql/create_accountwide_tables.sql"
                     if [ -f "$sql_file" ]; then
                         ale_run_sql_file "acore_characters" "$sql_file"
                     else
-                        print_warning "Expected SQL file not found: $sql_file"
-                        print_info "Locate create_accountwide_tables.sql in $clone_dir/sql/ and apply manually:"
-                        print_info "  mysql acore_characters < <path/to/create_accountwide_tables.sql>"
+                        # Fallback: search for the file if name changed upstream
+                        local found
+                        found=$(find "$clone_dir/sql" -name "*.sql" 2>/dev/null | head -1)
+                        if [ -n "$found" ]; then
+                            ale_run_sql_file "acore_characters" "$found"
+                        else
+                            print_warning "SQL file not found in $clone_dir/sql/"
+                        fi
                     fi
-                else
-                    print_warning "Database not available. Apply SQL manually when DB is running:"
-                    print_info "  mysql acore_characters < $sql_file"
                 fi
             else
                 print_info "Apply manually: mysql acore_characters < $clone_dir/sql/create_accountwide_tables.sql"
